@@ -1,0 +1,91 @@
+PROCEDURE "GENERIC_DATA_VALIDATOR"
+(
+   IN  ID    NVARCHAR(200),
+   OUT V_OUT NVARCHAR(5000)
+)
+LANGUAGE SQLSCRIPT
+SQL SECURITY INVOKER
+AS
+   lv_MODULE_NAME     NVARCHAR(100);
+   lv_SUB_MODULE_NAME NVARCHAR(100);
+   lv_LOAD_TEMPLATE   NVARCHAR(100);
+
+   lv_cols            NVARCHAR(5000);
+   lv_key_cols        NVARCHAR(2000);
+   lv_json_sql        NVARCHAR(10000);
+   lv_dup_sql         NVARCHAR(10000);
+   lv_dup_count       INTEGER;
+BEGIN
+
+   /* 1. Fetch module metadata */
+   SELECT MODULE_NAME,
+          SUB_MODULE_NAME,
+          LOAD_TEMPLATE
+     INTO lv_MODULE_NAME,
+          lv_SUB_MODULE_NAME,
+          lv_LOAD_TEMPLATE
+     FROM COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE
+    WHERE ID = :ID;
+
+   /* 2. Build JSON_TABLE column list (for data JSON) */
+   SELECT STRING_AGG(
+            '"' || COLUMN_NAME || '" ' || COLUMN_DATATYPE ||
+            ' PATH ''$.' || COLUMN_NAME || '''',
+            ','
+          )
+     INTO lv_cols
+     FROM COM_SCB_FILEUPLOAD_MASTER_LOADMAP
+    WHERE MODULE_NAME     = :lv_MODULE_NAME
+      AND SUB_MODULE_NAME = :lv_SUB_MODULE_NAME
+      AND LOAD_TEMPLATE   = :lv_LOAD_TEMPLATE;
+
+   /* 3. Extract UNIQUE columns from TEMPLATE JSON */
+   SELECT STRING_AGG('"' || COLUMN_NAME || '"', ',')
+     INTO lv_key_cols
+     FROM JSON_TABLE(
+          ( SELECT JSON_DATA
+              FROM COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE
+             WHERE MODULE_NAME     = :lv_MODULE_NAME
+               AND SUB_MODULE_NAME = :lv_SUB_MODULE_NAME
+               AND LOAD_TEMPLATE   = :lv_LOAD_TEMPLATE
+          ),
+          '$[*]'
+          COLUMNS
+          (
+            COLUMN_NAME NVARCHAR(200) PATH '$.COLUMN_NAME',
+            IS_UNIQUE   NVARCHAR(10)  PATH '$.IS_UNIQUE'
+          )
+     )
+     WHERE IS_UNIQUE = 'true';
+
+   /* 4. Build base JSON data query */
+   lv_json_sql :=
+     'SELECT jt.*
+        FROM JSON_TABLE(
+             ( SELECT JSON_DATA
+                 FROM COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE
+                WHERE ID = ''' || :ID || '''
+             ),
+             ''$[*]''
+             COLUMNS (' || :lv_cols || ')
+        ) jt';
+
+   /* 5. Duplicate check using composite key */
+   lv_dup_sql :=
+     'SELECT COUNT(*) FROM (
+        SELECT ' || :lv_key_cols || '
+          FROM (' || :lv_json_sql || ')
+         GROUP BY ' || :lv_key_cols || '
+        HAVING COUNT(*) > 1
+      )';
+
+   EXECUTE IMMEDIATE :lv_dup_sql INTO lv_dup_count;
+
+   /* 6. Validation result */
+   IF :lv_dup_count > 0 THEN
+      V_OUT := 'ERROR: Duplicate records found for composite key';
+   ELSE
+      V_OUT := 'SUCCESS: No duplicate records found';
+   END IF;
+
+END;
