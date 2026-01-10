@@ -1,106 +1,96 @@
-_showPreviewDialog: function (payload) {
+onUploadPress: async function () {
+  const module = this.byId("moduleComboBox").getSelectedKey();
+  const subModule = this.byId("subModuleComboBox").getSelectedKey();
+  const template = this.byId("loadTemplateComboBox").getSelectedKey();
+  const oFileUploader = this.byId("fileUploader");
+  const file = oFileUploader.getDomRef("fu").files?.[0];
 
-  const oExpiryDate = new sap.m.DatePicker({
-    placeholder: "Select Expiry Date",
-    change: function () {
-      oUploadBtn.setEnabled(!!oExpiryDate.getValue() && !!oLoadTypeSelect.getSelectedKey());
-    }
-  });
+  if (!module || !subModule || !template || !file) {
+    sap.m.MessageBox.error("Please select all dropdowns and choose a file.");
+    return;
+  }
 
-  const oLoadTypeSelect = new sap.m.Select({
-    items: [
-      new sap.ui.core.Item({ key: "TRUNCATE", text: "Truncate" }),
-      new sap.ui.core.Item({ key: "APPEND", text: "Append" })
-    ],
-    change: function () {
-      oUploadBtn.setEnabled(!!oExpiryDate.getDateValue() && !!oLoadTypeSelect.getSelectedKey());
-    }
-  });
+  const maxSize = 20 * 1024 * 1024;
+  if (file.size > maxSize) {
+    sap.m.MessageBox.error("File size exceeds 20 MB.");
+    return;
+  }
 
-  const oForm = new sap.ui.layout.form.SimpleForm({
-    editable: false,
-    layout: "ResponsiveGridLayout",
-    content: [
-      new sap.m.Label({ text: "Module" }),
-      new sap.m.Text({ text: payload.MODULE_NAME }),
+  sap.ui.core.BusyIndicator.show(0);
 
-      new sap.m.Label({ text: "Submodule" }),
-      new sap.m.Text({ text: payload.SUB_MODULE_NAME }),
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64Content = reader.result.split(",")[1];
 
-      new sap.m.Label({ text: "Template" }),
-      new sap.m.Text({ text: payload.LOAD_TEMPLATE }),
+    const payload = {
+      MODULE_NAME: module,
+      SUB_MODULE_NAME: subModule,
+      LOAD_TEMPLATE: template,
+      FILE_NAME: file.name,
+      STATUS: "uploaded",
+      FILE_MIME_TYPE: file.type,
+      FILE_SIZE: file.size,
+      FILE_CONTENT: base64Content
+    };
 
-      new sap.m.Label({ text: "File Name" }),
-      new sap.m.Text({ text: payload.FILE_NAME }),
+    try {
+      /* =====================================================
+         STEP 1: CREATE → runs Generic Data Validator
+         ===================================================== */
+      const listBinding = this.oModel.bindList("/ReportFileStorage");
+      const context = await listBinding.create(payload);
+      await context.created();
 
-      new sap.m.Label({ text: "Expiry Date" }),
-      oExpiryDate,
+      const createdObject = context.getObject();
+      const id = createdObject.ID;
 
-      new sap.m.Label({ text: "Load Type" }),
-      oLoadTypeSelect
-    ]
-  });
+      /* =====================================================
+         STEP 2: NOW call ValidateTemplate (data exists)
+         ===================================================== */
+      const oFunction = this.oModel.bindContext("/ValidateTemplate(...)");
+      oFunction.setParameter("MODULE_NAME", module);
+      oFunction.setParameter("SUB_MODULE_NAME", subModule);
+      oFunction.setParameter("LOAD_TEMPLATE", template);
+      oFunction.setParameter("FILE_CONTENT", base64Content);
 
-  const oUploadBtn = new sap.m.Button({
-    text: "Upload",
-    enabled: false,
-    press: async () => {
+      await oFunction.execute();
+      const result = oFunction.getBoundContext().getObject();
 
-      oDialog.setBusy(true);
-
-      const date = oExpiryDate.getDateValue();
-      const yyyy = date.getFullYear();
-      const mm = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-
-      payload.EXPIRY_DATE = `${yyyy}-${mm}-${dd}`;
-      payload.LOAD_TYPE = oLoadTypeSelect.getSelectedKey();
-
-      try {
-        // 🔴 BACKEND CREATE → RUNS GENERIC DATA VALIDATOR
-        const listBinding = this.oModel.bindList("/ReportFileStorage");
-        const context = await listBinding.create(payload);
-        await context.created();
-
-        // ✅ PROC PASSED
-        sap.m.MessageBox.success("File uploaded and validated successfully");
-
-        // refresh table
-        const oTable = this.byId("fileTable");
-        const oBindings = oTable.getBinding("rows");
-        if (oBindings) oBindings.refresh();
-
-        oDialog.close();
-
-      } catch (error) {
-
-        // ❌ PROC FAILED
-        let message = "Upload failed during validation";
-
-        if (error && error.responseText) {
-          try {
-            const odataError = JSON.parse(error.responseText);
-            message = odataError?.error?.message?.value || message;
-          } catch (e) {}
-        }
-
-        sap.m.MessageBox.error(message);
-
-      } finally {
-        oDialog.setBusy(false);
+      if (result.flag === false) {
+        sap.m.MessageBox.error(result.message);
+        return;
       }
+
+      /* =====================================================
+         STEP 3: SUCCESS
+         ===================================================== */
+      sap.m.MessageBox.success("File uploaded and validated successfully");
+
+      // refresh table
+      const oTable = this.byId("fileTable");
+      const oBindings = oTable.getBinding("rows");
+      if (oBindings) oBindings.refresh();
+
+    } catch (error) {
+
+      /* =====================================================
+         ERROR: Generic validator OR create failed
+         ===================================================== */
+      let message = "Upload failed";
+
+      if (error && error.responseText) {
+        try {
+          const odataError = JSON.parse(error.responseText);
+          message = odataError?.error?.message?.value || message;
+        } catch (e) {}
+      }
+
+      sap.m.MessageBox.error(message);
+
+    } finally {
+      sap.ui.core.BusyIndicator.hide();
     }
-  });
+  };
 
-  const oDialog = new sap.m.Dialog({
-    title: "Confirm Upload",
-    content: [oForm],
-    beginButton: oUploadBtn,
-    endButton: new sap.m.Button({
-      text: "Cancel",
-      press: () => oDialog.close()
-    })
-  });
-
-  oDialog.open();
+  reader.readAsDataURL(file);
 }
