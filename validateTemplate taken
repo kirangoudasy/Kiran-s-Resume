@@ -1,96 +1,13 @@
-onUploadPress: async function () {
-  const module = this.byId("moduleComboBox").getSelectedKey();
-  const subModule = this.byId("subModuleComboBox").getSelectedKey();
-  const template = this.byId("loadTemplateComboBox").getSelectedKey();
-  const oFileUploader = this.byId("fileUploader");
-  const file = oFileUploader.getDomRef("fu").files?.[0];
-
-  if (!module || !subModule || !template || !file) {
-    sap.m.MessageBox.error("Please select all dropdowns and choose a file.");
-    return;
-  }
-
-  const maxSize = 20 * 1024 * 1024;
-  if (file.size > maxSize) {
-    sap.m.MessageBox.error("File size exceeds 20 MB.");
-    return;
-  }
-
-  sap.ui.core.BusyIndicator.show(0);
-
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const base64Content = reader.result.split(",")[1];
-
-    const payload = {
-      MODULE_NAME: module,
-      SUB_MODULE_NAME: subModule,
-      LOAD_TEMPLATE: template,
-      FILE_NAME: file.name,
-      STATUS: "uploaded",
-      FILE_MIME_TYPE: file.type,
-      FILE_SIZE: file.size,
-      FILE_CONTENT: base64Content
-    };
-
-    try {
-      /* =====================================================
-         STEP 1: CREATE → runs Generic Data Validator
-         ===================================================== */
-      const listBinding = this.oModel.bindList("/ReportFileStorage");
-      const context = await listBinding.create(payload);
-      await context.created();
-
-      const createdObject = context.getObject();
-      const id = createdObject.ID;
-
-      /* =====================================================
-         STEP 2: NOW call ValidateTemplate (data exists)
-         ===================================================== */
-      const oFunction = this.oModel.bindContext("/ValidateTemplate(...)");
-      oFunction.setParameter("MODULE_NAME", module);
-      oFunction.setParameter("SUB_MODULE_NAME", subModule);
-      oFunction.setParameter("LOAD_TEMPLATE", template);
-      oFunction.setParameter("FILE_CONTENT", base64Content);
-
-      await oFunction.execute();
-      const result = oFunction.getBoundContext().getObject();
-
-      if (result.flag === false) {
-        sap.m.MessageBox.error(result.message);
-        return;
-      }
-
-      /* =====================================================
-         STEP 3: SUCCESS
-         ===================================================== */
-      sap.m.MessageBox.success("File uploaded and validated successfully");
-
-      // refresh table
-      const oTable = this.byId("fileTable");
-      const oBindings = oTable.getBinding("rows");
-      if (oBindings) oBindings.refresh();
-
-    } catch (error) {
-
-      /* =====================================================
-         ERROR: Generic validator OR create failed
-         ===================================================== */
-      let message = "Upload failed";
-
-      if (error && error.responseText) {
-        try {
-          const odataError = JSON.parse(error.responseText);
-          message = odataError?.error?.message?.value || message;
-        } catch (e) {}
-      }
-
-      sap.m.MessageBox.error(message);
-
-    } finally {
-      sap.ui.core.BusyIndicator.hide();
-    }
-  };
-
-  reader.readAsDataURL(file);
-}
+jquery-dbg.js:10224 
+ 
+ POST https://port35067-workspaces-ws-bfwue.ap11.applicationstudio.cloud.sap/service/ReportFileStorage 500 (Internal Server Error)
+Log-dbg.js:497 
+ 2026-01-10 18:06:43.270399 POST on 'ReportFileStorage' failed; will be repeated automatically - Failed to store file record.
+Error: Communication error: 500 Internal Server Error
+    at Object.createError (https://sapui5.hana.ondemand.com/1.138.0/resources/sap/ui/core/library-preload.js:2334:3891)
+    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap/ui/core/library-preload.js:2364:20629)
+    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1198:9657)
+    at u (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:25639)
+    at Object.fireWith [as rejectWith] (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:26474)
+    at k (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:84147)
+    at XMLHttpRequest.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:86804) sap.ui.model.odata.v4.ODataListBinding
