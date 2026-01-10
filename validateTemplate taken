@@ -1,65 +1,38 @@
-    onUploadPress: async function () {
-      const module = this.byId("moduleComboBox").getSelectedKey();
-      const subModule = this.byId("subModuleComboBox").getSelectedKey();
-      const template = this.byId("loadTemplateComboBox").getSelectedKey();
-      const oFileUploader = this.byId("fileUploader");
-      console.log(oFileUploader);
-      const file = oFileUploader.getDomRef("fu").files?.[0];
+PROCEDURE "FIND_DUP"(IN P_ID NVARCHAR(200))
+   LANGUAGE SQLSCRIPT
+   SQL SECURITY INVOKER
+   --DEFAULT SCHEMA <default_schema_name>
+   READS SQL DATA AS
 
-      if (!module || !subModule || !template || !file) {
-        sap.m.MessageBox.error("Please select all dropdowns and choose a file.");
-        return;
-      }
+   LV_SQL NVARCHAR(5000);
+BEGIN
+   /*************************************
+       Write your procedure logic
+   *************************************/
 
-      const maxSize = 20 * 1024 * 1024;
-      if (file.size > maxSize) {
-        sap.m.MessageBox.alert("File size exceeds 20 MB. Please upload a smaller file`.");
-        return; // stop further execution
-      }
-      sap.ui.core.BusyIndicator.show(0);
+    LV_SQL :=
+        'SELECT
+            JT.DATA1,
+            JT.DATA2,
+            COUNT(*) AS DUP_CNT
+         FROM
+         COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE
+            CROSS JOIN JSON_TABLE(
+                (SELECT JSON_DATA FROM COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE WHERE ID = ''' || :P_ID || ''' ),
+                ''$[*]''
+                COLUMNS (
+                    DATA1 NVARCHAR(200) PATH ''$.DATA1'',
+                    DATA2 NVARCHAR(200) PATH ''$.DATA2''
+                )
+            ) JT
+         WHERE
+            COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE.ID = ''' || :P_ID || '''
+         GROUP BY
+            JT.DATA1,
+            JT.DATA2
+         HAVING COUNT(*) > 1';
 
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Content = reader.result.split(",")[1];
-
-        const payload = {
-          MODULE_NAME: module,
-          SUB_MODULE_NAME: subModule,
-          LOAD_TEMPLATE: template,
-          FILE_NAME: file.name,
-          STATUS: "uploaded",
-          FILE_MIME_TYPE: file.type,
-          FILE_SIZE: file.size,
-          FILE_CONTENT: base64Content
-        };
-
-        //Do validation here...
-        var displayflag = false;
-        const oFunction = this.oModel.bindContext("/ValidateTemplate(...)");
-        oFunction.setParameter("FILE_CONTENT", base64Content);
-        oFunction.setParameter("MODULE_NAME", module);
-        oFunction.setParameter("SUB_MODULE_NAME", subModule);
-        oFunction.setParameter("LOAD_TEMPLATE", template);
-        oFunction.execute().then(() => {
-          const oCtx = oFunction.getBoundContext();
-          const data = oCtx.getObject();
-          sap.ui.core.BusyIndicator.hide();
-          if (data.flag === false) {
-            if (data.message === "Invalid headers") {
-              sap.m.MessageBox.error("Invalid headers");
-              return;
-            }
-            else {
-              sap.m.MessageBox.error(data.message);
-              return;
-            }
-          } else {
-            this._showPreviewDialog(payload);
-          }
-        });
+    EXECUTE IMMEDIATE :LV_SQL;
 
 
-      };
-
-      reader.readAsDataURL(file);
-    }
+END
