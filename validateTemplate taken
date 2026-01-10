@@ -1,38 +1,101 @@
-[
-    {
-        "COLUMN_NAME": "MEASURE",
-        "DATA_TYPE": "NVARCHAR(225)",
-        "CONSTRAINTS": "NOT NULL",
-        "IS_UNIQUE": true
-    },
-    {
-        "COLUMN_NAME": "ENTITY",
-        "DATA_TYPE": "NVARCHAR(225)",
-        "CONSTRAINTS": "NOT NULL",
-        "IS_UNIQUE": false
-    },
-    {
-        "COLUMN_NAME": "METRICS",
-        "DATA_TYPE": "NVARCHAR(225)",
-        "CONSTRAINTS": "NOT NULL",
-        "IS_UNIQUE": false
-    },
-    {
-        "COLUMN_NAME": "PERIOD",
-        "DATA_TYPE": "NVARCHAR(225)",
-        "CONSTRAINTS": "NOT NULL",
-        "IS_UNIQUE": false
-    },
-    {
-        "COLUMN_NAME": "CURRENCY",
-        "DATA_TYPE": "NVARCHAR(225)",
-        "CONSTRAINTS": "NOT NULL",
-        "IS_UNIQUE": false
-    },
-    {
-        "COLUMN_NAME": "AMOUNT",
-        "DATA_TYPE": "DECIMAL(38,12)",
-        "CONSTRAINTS": "NULL",
-        "IS_UNIQUE": false
-    }
-]
+PROCEDURE "GENERIC_DATA_VALIDATOR"
+(
+    IN  P_ID            NVARCHAR(36),
+    IN  P_MODULE        NVARCHAR(100),
+    IN  P_SUB_MODULE    NVARCHAR(100),
+    IN  P_LOAD_TEMPLATE NVARCHAR(100),
+    OUT O_STATUS        NVARCHAR(1),      -- 'S' or 'E'
+    OUT O_MESSAGE       NCLOB
+)
+LANGUAGE SQLSCRIPT
+SQL SECURITY INVOKER
+READS SQL DATA AS
+BEGIN
+
+    DECLARE LV_COLS        NVARCHAR(2000);
+    DECLARE LV_JSON_COLS   NVARCHAR(3000);
+    DECLARE LV_SQL         NVARCHAR(5000);
+    DECLARE LV_DUP_CNT     INTEGER DEFAULT 0;
+
+    /*************************************************
+     Step 1: Get UNIQUE columns from JSON_TEMPLATE
+    *************************************************/
+    SELECT STRING_AGG(COLUMN_NAME, ',')
+      INTO LV_COLS
+      FROM JSON_TABLE(
+           ( SELECT JSON_TEMPLATE
+               FROM COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE
+              WHERE MODULE_NAME     = :P_MODULE
+                AND SUB_MODULE_NAME = :P_SUB_MODULE
+                AND LOAD_TEMPLATE   = :P_LOAD_TEMPLATE
+           ),
+           '$[*]'
+           COLUMNS (
+             COLUMN_NAME NVARCHAR(100) PATH '$.COLUMN_NAME',
+             IS_UNIQUE   BOOLEAN       PATH '$.IS_UNIQUE'
+           )
+      )
+     WHERE IS_UNIQUE = TRUE;
+
+    -- If no unique columns defined → validation passes
+    IF :LV_COLS IS NULL THEN
+        O_STATUS  := 'S';
+        O_MESSAGE := 'No unique columns defined in template';
+        RETURN;
+    END IF;
+
+    /*************************************************
+     Step 2: Build JSON_TABLE column mapping
+    *************************************************/
+    SELECT STRING_AGG(
+           COLUMN_NAME || ' NVARCHAR(500) PATH ''$.' || COLUMN_NAME || '''',
+           ','
+    )
+    INTO LV_JSON_COLS
+    FROM JSON_TABLE(
+         ( SELECT JSON_TEMPLATE
+             FROM COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE
+            WHERE MODULE_NAME     = :P_MODULE
+              AND SUB_MODULE_NAME = :P_SUB_MODULE
+              AND LOAD_TEMPLATE   = :P_LOAD_TEMPLATE
+         ),
+         '$[*]'
+         COLUMNS (
+           COLUMN_NAME NVARCHAR(100) PATH '$.COLUMN_NAME',
+           IS_UNIQUE   BOOLEAN       PATH '$.IS_UNIQUE'
+         )
+    )
+    WHERE IS_UNIQUE = TRUE;
+
+    /*************************************************
+     Step 3: Dynamic duplicate DATA check
+    *************************************************/
+    LV_SQL :=
+    'SELECT COUNT(*) FROM (
+        SELECT ' || LV_COLS || ', COUNT(*) CNT
+          FROM COM_SCB_FILEUPLOAD_MASTER_REPORTFILE_DUMMY D
+          CROSS JOIN JSON_TABLE(
+              D.JSON_DATA,
+              ''$[*]''
+              COLUMNS ( ' || LV_JSON_COLS || ' )
+          ) JT
+         WHERE D.ID = ''' || :P_ID || '''
+         GROUP BY ' || LV_COLS || '
+         HAVING COUNT(*) > 1
+     )';
+
+    EXECUTE IMMEDIATE :LV_SQL INTO LV_DUP_CNT;
+
+    /*************************************************
+     Step 4: Result
+    *************************************************/
+    IF :LV_DUP_CNT > 0 THEN
+        O_STATUS  := 'E';
+        O_MESSAGE := 'Duplicate data found for unique column combination';
+        RETURN;
+    END IF;
+
+    O_STATUS  := 'S';
+    O_MESSAGE := 'Validation successful';
+
+END;
