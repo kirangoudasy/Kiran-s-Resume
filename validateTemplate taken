@@ -1,15 +1,16 @@
 srv.on('CREATE', "ReportFileStorage", async (req) => {
   try {
-    const result = await cds.tx(req).create("com.scb.fileupload.master.ReportFileStorage").entries(req.data);
+    const result = await cds.tx(req)
+      .create("com.scb.fileupload.master.ReportFileStorage")
+      .entries(req.data);
 
     const uuid = result?.ID || req.data.ID;
     const db = cds.transaction(req);
 
-    /* ---------- EXISTING CODE (unchanged) ---------- */
-
     const file = await db.run(
-      SELECT.from('com.scb.fileupload.master.ReportFileStorage')
-        .columns('FILE_CONTENT')
+      SELECT
+        .from('com.scb.fileupload.master.ReportFileStorage')
+        .columns('FILE_CONTENT', 'FILE_NAME', 'FILE_MIME_TYPE')
         .where({ ID: uuid })
     );
 
@@ -17,41 +18,95 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
       req.error(404, 'File not found');
     }
 
-    const buffer = await (async (readableStream) => {
+    const { FILE_CONTENT } = file[0];
+
+    const streamToBuffer = async (readableStream) => {
       const chunks = [];
-      for await (const chunk of readableStream) chunks.push(chunk);
+      for await (const chunk of readableStream) {
+        chunks.push(chunk);
+      }
       return Buffer.concat(chunks);
-    })(file[0].FILE_CONTENT);
+    };
+
+    const buffer = await streamToBuffer(FILE_CONTENT);
 
     const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
 
+    // Convert Excel to JSON
     const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
 
-    const reportFileStorageItem = (
-      await db.run(
-        SELECT.from('com.scb.fileupload.master.ReportFileStorage')
-          .columns('MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
-          .where({ ID: uuid })
-      )
-    )[0];
+    // Fetch module, submodule, template
+    const reportFileStorageList = await db.run(
+      SELECT
+        .from('com.scb.fileupload.master.ReportFileStorage')
+        .columns('MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
+        .where({ ID: uuid })
+    );
 
-    /* ---------- DATE / TIME CONVERSION (unchanged) ---------- */
+    const reportFileStorageItem = reportFileStorageList[0];
+
+    // Fetch column datatype mapping
+    const loadTableList = await db.run(
+      SELECT
+        .from('com.scb.fileupload.master.LoadMap')
+        .columns('COLUMN_NAME', 'COLUMN_DATATYPE')
+        .where({
+          MODULE_NAME: reportFileStorageItem.MODULE_NAME,
+          SUB_MODULE_NAME: reportFileStorageItem.SUB_MODULE_NAME,
+          LOAD_TEMPLATE: reportFileStorageItem.LOAD_TEMPLATE
+        })
+        .orderBy('LOAD_COLUMN_SEQ')
+    );
+
+    const excepetedMap = loadTableList.reduce((acc, item) => {
+      acc[item.COLUMN_NAME] = item.COLUMN_DATATYPE;
+      return acc;
+    }, {});
+
+    // Date conversion
+    const dateKeys = Object.entries(excepetedMap)
+      .filter(([_, v]) => v === "DATE")
+      .map(([k]) => k);
+
+    if (dateKeys.length) {
+      jsonData.forEach(row => {
+        dateKeys.forEach(col => {
+          const dateChange = Datechange(row[col]);
+          if (dateChange) row[col] = dateChange;
+        });
+      });
+    }
+
+    // Time conversion
+    const timeKeys = Object.entries(excepetedMap)
+      .filter(([_, v]) => v === "TIME")
+      .map(([k]) => k);
+
+    if (timeKeys.length) {
+      jsonData.forEach(row => {
+        timeKeys.forEach(col => {
+          const timeChange = convertTime(row[col]);
+          if (timeChange) row[col] = timeChange;
+        });
+      });
+    }
 
     const strJson = JSON.stringify(jsonData);
 
-    /* =======================================================
-       ✅ NEW CHANGE #1 — INSERT INTO DUMMY TABLE
-       ======================================================= */
+    /* =====================================================
+       🔴 NEW CHANGE #1: INSERT JSON INTO DUMMY TABLE
+       ===================================================== */
     await INSERT.into('com.scb.fileupload.master.ReportFileDummy')
       .entries({
         ID: uuid,
         JSON_DATA: strJson
       });
 
-    /* =======================================================
-       ✅ NEW CHANGE #2 — CALL GENERIC DATA VALIDATOR
-       ======================================================= */
+    /* =====================================================
+       🔴 NEW CHANGE #2: CALL GENERIC DATA VALIDATOR
+       ===================================================== */
     const validatorResult = await db.run(`
       CALL GENERIC_DATA_VALIDATOR(
         '${uuid}',
@@ -64,9 +119,9 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
 
     const { O_STATUS, O_MESSAGE } = validatorResult[0];
 
-    /* =======================================================
-       ❌ VALIDATION FAILED → CLEANUP & STOP
-       ======================================================= */
+    /* =====================================================
+       🔴 NEW CHANGE #3: HANDLE FAILURE
+       ===================================================== */
     if (O_STATUS === 'E') {
       await DELETE.from('com.scb.fileupload.master.ReportFileDummy')
         .where({ ID: uuid });
@@ -74,9 +129,9 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
       return req.error(400, O_MESSAGE);
     }
 
-    /* =======================================================
-       ✅ VALIDATION SUCCESS → MOVE TO MAIN TABLE
-       ======================================================= */
+    /* =====================================================
+       🔴 NEW CHANGE #4: MOVE DATA TO MAIN TABLE ON SUCCESS
+       ===================================================== */
     await UPDATE('com.scb.fileupload.master.ReportFileStorage')
       .set({ JSON_DATA: strJson })
       .where({ ID: uuid });
@@ -89,5 +144,66 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
   } catch (err) {
     console.error('Error during file upload:', err);
     req.error(500, 'Failed to store file record.');
+  }
+
+  /* ================= HELPER FUNCTIONS (UNCHANGED) ================= */
+
+  function convertTime(value) {
+    if (!value) return "";
+
+    if (typeof value === "number" && value >= 0 && value < 1) {
+      const totalSeconds = Math.round(value * 86400);
+      const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
+      const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+      const ss = String(totalSeconds % 60).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    const str = String(value).trim();
+
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(str)) return str + ":00";
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(str)) return str;
+    if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d+$/.test(str))
+      return str.split(".")[0];
+
+    const ampmMatch = str.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
+    if (ampmMatch) {
+      let [_, h, m, ampm] = ampmMatch;
+      h = Number(h);
+      if (ampm.toUpperCase() === "PM" && h !== 12) h += 12;
+      if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
+      return `${String(h).padStart(2, "0")}:${m}:00`;
+    }
+
+    const tryParse = new Date("1970-01-01T" + str);
+    if (!isNaN(tryParse.getTime()))
+      return tryParse.toISOString().split("T")[1].substring(0, 8);
+
+    return "";
+  }
+
+  function Datechange(value) {
+    if (!value) return "";
+
+    if (typeof value === "number") {
+      const excelDate = new Date((value - 25569) * 86400 * 1000);
+      if (isNaN(excelDate.getTime())) return "";
+      return excelDate.toISOString().split("T")[0];
+    }
+
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime()))
+      return parsed.toISOString().split("T")[0];
+
+    value = String(value).trim();
+    const match = value.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})$/);
+
+    if (match) {
+      const [, dd, mm, yyyy] = match;
+      const iso = `${yyyy}-${mm}-${dd}`;
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) return iso;
+    }
+    return "";
   }
 });
