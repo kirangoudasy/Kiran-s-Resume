@@ -1,13 +1,14 @@
 srv.on('CREATE', "ReportFileStorage", async (req) => {
+  const tx = cds.tx(req); // 🔴 FIX: single transaction
+
   try {
-    const result = await cds.tx(req)
+    const result = await tx
       .create("com.scb.fileupload.master.ReportFileStorage")
       .entries(req.data);
 
     const uuid = result?.ID || req.data.ID;
-    const db = cds.transaction(req);
 
-    const file = await db.run(
+    const file = await tx.run(
       SELECT
         .from('com.scb.fileupload.master.ReportFileStorage')
         .columns('FILE_CONTENT', 'FILE_NAME', 'FILE_MIME_TYPE')
@@ -15,7 +16,7 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
     );
 
     if (!file || file.length === 0) {
-      req.error(404, 'File not found');
+      return req.error(404, 'File not found');
     }
 
     const { FILE_CONTENT } = file[0];
@@ -38,7 +39,7 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
     const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
 
     // Fetch module, submodule, template
-    const reportFileStorageList = await db.run(
+    const reportFileStorageList = await tx.run(
       SELECT
         .from('com.scb.fileupload.master.ReportFileStorage')
         .columns('MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
@@ -48,7 +49,7 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
     const reportFileStorageItem = reportFileStorageList[0];
 
     // Fetch column datatype mapping
-    const loadTableList = await db.run(
+    const loadTableList = await tx.run(
       SELECT
         .from('com.scb.fileupload.master.LoadMap')
         .columns('COLUMN_NAME', 'COLUMN_DATATYPE')
@@ -95,55 +96,73 @@ srv.on('CREATE', "ReportFileStorage", async (req) => {
 
     const strJson = JSON.stringify(jsonData);
 
-    /* =====================================================
-       🔴 NEW CHANGE #1: INSERT JSON INTO DUMMY TABLE
-       ===================================================== */
-    await INSERT.into('com.scb.fileupload.master.Dummy')
-      .entries({
+    /* 🔴 FIX 1: CLEAN DUMMY BEFORE INSERT */
+    await tx.run(
+      DELETE.from('com.scb.fileupload.master.Dummy')
+        .where({ ID: uuid })
+    );
+
+    /* 🔴 INSERT INTO DUMMY */
+    await tx.run(
+      INSERT.into('com.scb.fileupload.master.Dummy').entries({
         ID: uuid,
         JSON_DATA: strJson
-      });
+      })
+    );
 
-    /* =====================================================
-       🔴 NEW CHANGE #2: CALL GENERIC DATA VALIDATOR
-       ===================================================== */
-    const validatorResult = await db.run(`
-      CALL GENERIC_DATA_VALIDATOR(
-        '${uuid}',
-        '${reportFileStorageItem.MODULE_NAME}',
-        '${reportFileStorageItem.SUB_MODULE_NAME}',
-        '${reportFileStorageItem.LOAD_TEMPLATE}',
-        ?, ?
-      )
+    /* 🔴 FIX 2: CORRECT PROC CALL */
+    const validatorResult = await tx.run(`
+      DO BEGIN
+        DECLARE v_status NVARCHAR(1);
+        DECLARE v_message NVARCHAR(2000);
+
+        CALL GENERIC_DATA_VALIDATOR(
+          '${uuid}',
+          '${reportFileStorageItem.MODULE_NAME}',
+          '${reportFileStorageItem.SUB_MODULE_NAME}',
+          '${reportFileStorageItem.LOAD_TEMPLATE}',
+          v_status,
+          v_message
+        );
+
+        SELECT :v_status AS O_STATUS, :v_message AS O_MESSAGE FROM DUMMY;
+      END;
     `);
 
     const { O_STATUS, O_MESSAGE } = validatorResult[0];
 
-    /* =====================================================
-       🔴 NEW CHANGE #3: HANDLE FAILURE
-       ===================================================== */
     if (O_STATUS === 'E') {
-      await DELETE.from('com.scb.fileupload.master.Dummy')
-        .where({ ID: uuid });
-
+      await tx.run(
+        DELETE.from('com.scb.fileupload.master.Dummy')
+          .where({ ID: uuid })
+      );
       return req.error(400, O_MESSAGE);
     }
 
-    /* =====================================================
-       🔴 NEW CHANGE #4: MOVE DATA TO MAIN TABLE ON SUCCESS
-       ===================================================== */
-    await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-      .set({ JSON_DATA: strJson })
-      .where({ ID: uuid });
+    /* 🔴 MOVE DATA TO MAIN TABLE */
+    await tx.run(
+      UPDATE('com.scb.fileupload.master.ReportFileStorage')
+        .set({ JSON_DATA: strJson })
+        .where({ ID: uuid })
+    );
 
-    await DELETE.from('com.scb.fileupload.master.Dummy')
-      .where({ ID: uuid });
+    /* 🔴 CLEAN DUMMY AFTER SUCCESS */
+    await tx.run(
+      DELETE.from('com.scb.fileupload.master.Dummy')
+        .where({ ID: uuid })
+    );
 
     return { ID: uuid };
 
   } catch (err) {
     console.error('Error during file upload:', err);
-    req.error(500, 'Failed to store file record.');
+
+    // 🔴 FIX 3: DO NOT CONVERT BUSINESS ERROR TO 500
+    if (err.statusCode) {
+      throw err;
+    }
+
+    return req.error(500, 'Failed to store file record.');
   }
 
   /* ================= HELPER FUNCTIONS (UNCHANGED) ================= */
