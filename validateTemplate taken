@@ -1,209 +1,804 @@
-srv.on('CREATE', "ReportFileStorage", async (req) => {
-  try {
-    const result = await cds.tx(req)
-      .create("com.scb.fileupload.master.ReportFileStorage")
-      .entries(req.data);
+sap.ui.define([
+  "sap/ui/core/mvc/Controller",
+  "sap/m/MessageToast",
+  "sap/m/MessageBox",
+  "sap/ui/core/Fragment",
+  "sap/ui/model/json/JSONModel"
 
-    const uuid = result?.ID || req.data.ID;
-    const db = cds.transaction(req);
+], (Controller, MessageBox) => {
+  "use strict";
 
-    const file = await db.run(
-      SELECT
-        .from('com.scb.fileupload.master.ReportFileStorage')
-        .columns('FILE_CONTENT', 'FILE_NAME', 'FILE_MIME_TYPE')
-        .where({ ID: uuid })
-    );
+  return Controller.extend("fileuploader.controller.fileuploader", {
+    onInit: function () {
+      this.oModel = this.getOwnerComponent().getModel(); // OData V4 model
 
-    if (!file || file.length === 0) {
-      req.error(404, 'File not found');
-    }
 
-    const { FILE_CONTENT } = file[0];
+      const oFunction = this.oModel.bindContext("/getTabVisibility(...)");
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+        //enable tabs
+        this.byId("uploaderMakerTab").setVisible(data.uploader_maker);
+        this.byId("uploaderCheckerTab").setVisible(data.uploader_checker);
 
-    const streamToBuffer = async (readableStream) => {
-      const chunks = [];
-      for await (const chunk of readableStream) {
-        chunks.push(chunk);
+      });
+
+
+      //get all roles
+
+      const oFunctionRole = this.oModel.bindContext("/getAllRoles(...)");
+      oFunctionRole.execute().then(() => {
+        const oCtx = oFunctionRole.getBoundContext();
+        const data = oCtx.getObject();
+        console.log("--------------------ROLES-------------------")
+        console.log(data.value);
+
+      });
+
+
+
+      this._applyTableFilterMaker();
+      this._applyTableFilterChecker();
+    },
+
+    _applyTableFilterMaker: async function () {
+      var oTable = this.byId("fileTable").setModel(this.oModel);
+      var oBinding = await oTable.getBinding("rows");
+      const oFunction = this.oModel.bindContext("/ReportFileStorageMaker(...)");
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+        var oFilter = new sap.ui.model.Filter(
+          "createdBy",
+          sap.ui.model.FilterOperator.EQ,
+          data.value
+        );
+
+        var oSorter = new sap.ui.model.Sorter("createdAt", true); // true = descending
+        oBinding.sort([oSorter]);
+        oBinding.filter([oFilter]);
+      });
+
+    },
+
+
+    _applyTableFilterChecker: function () {
+      var oTable = this.byId("dashboardTable").setModel(this.oModel);
+      var oBinding = oTable.getBinding("rows");
+
+      const oFunction = this.oModel.bindContext("/ReportFileStorageChecker(...)");
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+        console.log(data.value)
+
+
+        // Filter 1: STATUS != 'uploaded'
+        var oStatusFilter = new sap.ui.model.Filter("STATUS", sap.ui.model.FilterOperator.NE, "uploaded");
+
+        // Filter 2: username in array
+        var modules = data.value;
+        var aModuleFilters = modules.map(u => new sap.ui.model.Filter("MODULE_NAME", sap.ui.model.FilterOperator.EQ, u));
+
+        // Combine username filters with OR
+        var oModuleFilter = new sap.ui.model.Filter({
+          filters: aModuleFilters,
+          and: false  // OR
+        });
+
+        // Combine STATUS filter and username filter with AND
+        var oFinalFilter = new sap.ui.model.Filter({
+          filters: [oStatusFilter, oModuleFilter],
+          and: true  // AND
+        });
+
+        console.log(oFinalFilter)
+        var oSorter = new sap.ui.model.Sorter("createdAt", true); // true = descending
+        oBinding.sort([oSorter]);
+        oBinding.filter([oFinalFilter]);
+      });
+
+    },
+
+    onModuleChange: function (oEvent) {
+      const selectedModule = oEvent.getSource().getSelectedKey();
+      const oSubModuleComboBox = this.byId("subModuleComboBox");
+      oSubModuleComboBox.setSelectedKey(null);
+
+      oSubModuleComboBox.bindItems({
+        path: "/LoadTable",
+        parameters: {
+          // OData V4 way to get DISTINCT
+          $apply: "filter(MODULE_NAME eq '" + selectedModule + "')/groupby((SUB_MODULE_NAME))"
+        },
+        template: new sap.ui.core.Item({
+          key: "{SUB_MODULE_NAME}",
+          text: "{SUB_MODULE_NAME}"
+        }),
+        sorter: new sap.ui.model.Sorter("SUB_MODULE_NAME", false)
+      });
+
+      // Clear next dependent dropdown
+      this.byId("loadTemplateComboBox").removeAllItems();
+      this.byId("loadTemplateComboBox").setSelectedKey(null);
+    },
+
+    onSubModuleChange: function (oEvent) {
+      const selectedModule = this.byId("moduleComboBox").getSelectedKey();
+      const selectedSubModule = oEvent.getSource().getSelectedKey();
+      const oLoadTemplateComboBox = this.byId("loadTemplateComboBox");
+      //kiran/sundar
+
+      const today = new Date().toISOString().slice(0, 10);
+      console.log("today date",today)
+      oLoadTemplateComboBox.destroyItems();
+
+      oLoadTemplateComboBox.bindItems({
+        path: "/LoadTable",
+        parameters: {
+          $select: "LOAD_TEMPLATE",
+          $filter: `MODULE_NAME eq '${selectedModule}' and SUB_MODULE_NAME eq '${selectedSubModule}'`
+        },
+        template: new sap.ui.core.Item({
+          key: "{LOAD_TEMPLATE}",
+          text: "{LOAD_TEMPLATE}",
+          //Doesn't display Expired templates
+          //kiran/sundar 
+          enabled: {
+            path: "EXPIRY_DATE",
+            targetType: "any",
+            formatter: function (sDate) {
+              if (!sDate) return false;
+              return sDate >= today;
+            }
+          }
+        }),
+        sorter: new sap.ui.model.Sorter("LOAD_TEMPLATE", false),
+        filters: [
+          new sap.ui.model.Filter("MODULE_NAME", "EQ", selectedModule),
+          new sap.ui.model.Filter("SUB_MODULE_NAME", "EQ", selectedSubModule)
+        ]
+      });
+    },
+
+    onUploadPress: async function () {
+      const module = this.byId("moduleComboBox").getSelectedKey();
+      const subModule = this.byId("subModuleComboBox").getSelectedKey();
+      const template = this.byId("loadTemplateComboBox").getSelectedKey();
+      const oFileUploader = this.byId("fileUploader");
+      console.log(oFileUploader);
+      const file = oFileUploader.getDomRef("fu").files?.[0];
+
+      if (!module || !subModule || !template || !file) {
+        sap.m.MessageBox.error("Please select all dropdowns and choose a file.");
+        return;
       }
-      return Buffer.concat(chunks);
-    };
 
-    const buffer = await streamToBuffer(FILE_CONTENT);
+      const maxSize = 20 * 1024 * 1024;
+      if (file.size > maxSize) {
+        sap.m.MessageBox.alert("File size exceeds 20 MB. Please upload a smaller file`.");
+        return; // stop further execution
+      }
+      sap.ui.core.BusyIndicator.show(0);
 
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Content = reader.result.split(",")[1];
 
-    // Convert Excel to JSON
-    const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
+        const payload = {
+          MODULE_NAME: module,
+          SUB_MODULE_NAME: subModule,
+          LOAD_TEMPLATE: template,
+          FILE_NAME: file.name,
+          STATUS: "uploaded",
+          FILE_MIME_TYPE: file.type,
+          FILE_SIZE: file.size,
+          FILE_CONTENT: base64Content
+        };
 
-    // Fetch module, submodule, template
-    const reportFileStorageList = await db.run(
-      SELECT
-        .from('com.scb.fileupload.master.ReportFileStorage')
-        .columns('MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
-        .where({ ID: uuid })
-    );
+        //Do validation here...
+        var displayflag = false;
+        const oFunction = this.oModel.bindContext("/ValidateTemplate(...)");
+        oFunction.setParameter("FILE_CONTENT", base64Content);
+        oFunction.setParameter("MODULE_NAME", module);
+        oFunction.setParameter("SUB_MODULE_NAME", subModule);
+        oFunction.setParameter("LOAD_TEMPLATE", template);
+        oFunction.execute().then(() => {
+          const oCtx = oFunction.getBoundContext();
+          const data = oCtx.getObject();
+          sap.ui.core.BusyIndicator.hide();
+          if (data.flag === false) {
+            if (data.message === "Invalid headers") {
+              sap.m.MessageBox.error("Invalid headers");
+              return;
+            }
+            else {
+              sap.m.MessageBox.error(data.message);
+              return;
+            }
+          } else {
+            this._showPreviewDialog(payload);
+          }
+        });
 
-    const reportFileStorageItem = reportFileStorageList[0];
 
-    // Fetch column datatype mapping
-    const loadTableList = await db.run(
-      SELECT
-        .from('com.scb.fileupload.master.LoadMap')
-        .columns('COLUMN_NAME', 'COLUMN_DATATYPE')
-        .where({
-          MODULE_NAME: reportFileStorageItem.MODULE_NAME,
-          SUB_MODULE_NAME: reportFileStorageItem.SUB_MODULE_NAME,
-          LOAD_TEMPLATE: reportFileStorageItem.LOAD_TEMPLATE
+      };
+
+      reader.readAsDataURL(file);
+    },
+    _showPreviewDialog: function (payload) {
+
+      const oExpiryDate = new sap.m.DatePicker({
+        placeholder: "Select Expiry Date",
+        change: function () {
+          oUploadBtn.setEnabled(!!oExpiryDate.getValue() && !!oLoadTypeSelect.getSelectedKey());
+        }
+      });
+
+
+
+      const oLoadTypeSelect = new sap.m.Select({
+        items: [
+          new sap.ui.core.Item({ key: "TRUNCATE", text: "Truncate" }),
+          new sap.ui.core.Item({ key: "APPEND", text: "Append" })
+        ],
+        change: function () {
+          oUploadBtn.setEnabled(!!oExpiryDate.getDateValue() && !!oLoadTypeSelect.getSelectedKey());
+        }
+      });
+
+      const oForm = new sap.ui.layout.form.SimpleForm({
+        editable: false,
+        layout: "ResponsiveGridLayout",
+        content: [
+          new sap.m.Label({ text: "Module" }),
+          new sap.m.Text({ text: payload.MODULE_NAME }),
+
+          new sap.m.Label({ text: "Submodule" }),
+          new sap.m.Text({ text: payload.SUB_MODULE_NAME }),
+
+          new sap.m.Label({ text: "Template" }),
+          new sap.m.Text({ text: payload.LOAD_TEMPLATE }),
+
+          new sap.m.Label({ text: "File Name" }),
+          new sap.m.Text({ text: payload.FILE_NAME }),
+
+          new sap.m.Label({ text: "Expiry Date" }),
+          oExpiryDate,
+
+          new sap.m.Label({ text: "Load Type" }),
+          oLoadTypeSelect
+        ]
+      });
+
+      const oUploadBtn = new sap.m.Button({
+        text: "Upload",
+        enabled: false,
+        press: async () => {
+          oDialog.setBusy(true);
+          const date = oExpiryDate.getDateValue();
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0'); // months are 0-indexed
+          const dd = String(date.getDate()).padStart(2, '0');
+
+          payload.EXPIRY_DATE = `${yyyy}-${mm}-${dd}`;
+          console.log(payload.EXPIRY_DATE);
+
+          payload.LOAD_TYPE = oLoadTypeSelect.getSelectedKey(); // ⬅️ new field added
+
+          try {
+            const listBinding = this.oModel.bindList("/ReportFileStorage");
+            const context = await listBinding.create(payload);
+            await context.created();
+            const oObject = context.getObject();
+            const id = oObject.ID;
+
+            sap.m.MessageToast.show("Upload successful!");
+
+            //audit trail record..
+
+            const oEntry = {
+              REPORT_ID: id,  // <-- FK to ReportFileStorage
+              MODULE_NAME: payload.MODULE_NAME,
+              SUB_MODULE_NAME: payload.SUB_MODULE_NAME,
+              LOAD_TEMPLATE: payload.LOAD_TEMPLATE
+            };
+
+            // Create the audit trail
+            const listBinding1 = this.oModel.bindList("/AuditTrailReport");
+            const context1 = await listBinding1.create(oEntry);
+            await context1.created();
+
+
+            const oTable = this.byId("fileTable");
+            const oBindings = oTable.getBinding("rows");
+            if (oBindings) {
+              oBindings.refresh();
+            }
+          } catch (error) {
+            console.error("Upload error:", error);
+
+            let message = "Upload failed.";
+            if (error && error.message) {
+              message = error.message;
+            } else if (error && error.responseText) {
+              try {
+                const odataError = JSON.parse(error.responseText);
+                message = odataError.error?.message?.value || message;
+              } catch (e) {
+                // fallback to default message
+              }
+            }
+            sap.m.MessageToast.show(message);
+          } finally {
+            oDialog.setBusy(false);
+            oDialog.close();
+          }
+        }
+      });
+
+      const oDialog = new sap.m.Dialog({
+        title: "Confirm Upload",
+        content: [oForm],
+        beginButton: oUploadBtn,
+        endButton: new sap.m.Button({
+          text: "Cancel",
+          press: () => oDialog.close()
         })
-        .orderBy('LOAD_COLUMN_SEQ')
-    );
+      });
 
-    const excepetedMap = loadTableList.reduce((acc, item) => {
-      acc[item.COLUMN_NAME] = item.COLUMN_DATATYPE;
-      return acc;
-    }, {});
+      oDialog.open();
+    }
+    ,
 
-    // Date conversion
-    const dateKeys = Object.entries(excepetedMap)
-      .filter(([_, v]) => v === "DATE")
-      .map(([k]) => k);
+    onDownloadPress: async function () {
 
-    if (dateKeys.length) {
-      jsonData.forEach(row => {
-        dateKeys.forEach(col => {
-          const dateChange = Datechange(row[col]);
-          if (dateChange) row[col] = dateChange;
+      const module = this.byId("moduleComboBox").getSelectedKey();
+      const subModule = this.byId("subModuleComboBox").getSelectedKey();
+      const template = this.byId("loadTemplateComboBox").getSelectedKey();
+
+      if (!module || !subModule || !template) {
+        sap.m.MessageBox.error("Please select all dropdowns.");
+        return;
+      }
+
+      const oModel = this.getOwnerComponent().getModel();
+
+      const oFunction = oModel.bindContext("/downloadTemplate(...)");
+
+      oFunction.setParameter("MODULE_NAME", module);
+      oFunction.setParameter("SUB_MODULE_NAME", subModule);
+      oFunction.setParameter("LOAD_TEMPLATE", template);
+
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+
+        const byteCharacters = atob(data.FILE_CONTENT);
+        const byteNumbers = Array.from(byteCharacters, char => char.charCodeAt(0));
+        const byteArray = new Uint8Array(byteNumbers);
+
+        const blob = new Blob([byteArray], { type: data.FILE_MIME_TYPE });
+
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = data.FILE_NAME;
+        link.click();
+      });
+    },
+    onDownloadFilePress: function (oEvent) {
+      const fileId = oEvent.getSource().getBindingContext().getProperty("ID");
+
+      const oModel = this.getOwnerComponent().getModel();
+
+      const oFunction = oModel.bindContext("/downloadFile(...)");
+
+      oFunction.setParameter("ID", fileId);
+
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+
+        const byteCharacters = atob(data.FILE_CONTENT);
+        const byteNumbers = Array.from(byteCharacters, char => char.charCodeAt(0));
+        const byteArray = new Uint8Array(byteNumbers);
+
+        const blob = new Blob([byteArray], { type: data.FILE_MIME_TYPE });
+
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = data.FILE_NAME;
+        link.click();
+      });
+    },
+    onRequestApproval: async function () {
+      
+      const oTable = this.byId("fileTable");
+      const aSelectedIndices = oTable.getSelectedIndices();
+      
+      if (aSelectedIndices.length === 0) {
+        sap.m.MessageToast.show("Please select at least one row.");
+        return;
+      }
+
+      oTable.setBusy(true);
+
+      const oModel = this.getOwnerComponent().getModel();
+
+      const aUUIDs = [];
+
+      await aSelectedIndices.forEach((iIndex) => {
+        const oContext = oTable.getContextByIndex(iIndex);
+        const oRowData = oContext.getObject();
+        aUUIDs.push(oRowData.ID); // 
+      });
+
+      const oFunction = oModel.bindContext("/UpdateStatusBatch(...)");
+
+      oFunction.setParameter("IDs", JSON.stringify(aUUIDs));
+
+      oFunction.execute().then(() => {
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+        const oBindings = oTable.getBinding("rows");
+        if (oBindings) oBindings.refresh();
+
+        //update audit trail in backend
+
+        oTable.setBusy(false);
+        sap.m.MessageToast.show(data.value);
+
+      });
+
+    },
+
+
+
+    onPreview: async function (oEvent) {
+      const oView = this.getView();
+
+      const oButton = oEvent.getSource();
+      const sParam = oButton.getCustomData().find(d => d.getKey() === "role")?.getValue();
+      var oTables = "";
+      if (sParam === "checker") {
+        oTables = this.byId("dashboardTable");
+      } else {
+        oTables = this.byId("fileTable");
+      }
+
+      const aSelectedIndices = oTables.getSelectedIndices();
+
+      if (aSelectedIndices.length != 1) {
+        sap.m.MessageToast.show("Please select any one preview.");
+        return;
+      }
+
+      const aUUIDs = [];
+      oTables.setBusy(true);
+      await aSelectedIndices.forEach((iIndex) => {
+        const oContext = oTables.getContextByIndex(iIndex);
+        const oRowData = oContext.getObject();
+        aUUIDs.push(oRowData.ID); // 
+      });
+
+      const ID = aUUIDs[0];
+
+
+      const oModel = this.getOwnerComponent().getModel();
+
+      const oFunction = oModel.bindContext("/fetchPreview(...)");
+      oFunction.setParameter("ID", ID);
+
+      await oFunction.execute();
+      const oCtx = oFunction.getBoundContext();
+      const data = oCtx.getObject(); // full JSON array
+      const first10 = data.value;
+
+      const oFirstRecord = first10[0];
+
+      const oModels = new sap.ui.model.json.JSONModel({ rows: first10 });
+      oView.setModel(oModels, "preview");
+
+      const aColumns = [];
+      // Create table
+      const oTable = new sap.ui.table.Table({
+        visibleRowCount: 12,     // Vertical scroll when more than 10 rows
+        selectionMode: "None",
+        columnHeaderVisible: true,
+        rows: { path: "preview>/rows" }
+      });
+
+      // Add columns dynamically
+      for (const key in oFirstRecord) {
+        oTable.addColumn(new sap.ui.table.Column({
+          label: new sap.m.Label({ text: key }),
+          template: new sap.m.Text({ text: `{preview>${key}}` }),
+          sortProperty: key,
+          filterProperty: key
+        }));
+      }
+
+
+
+
+      if (!this._oPreviewDialog) {
+        this._oPreviewDialog = await sap.ui.core.Fragment.load({
+          name: "fileuploader.view.fragment.PreviewDialog",
+          controller: this
         });
+        oView.addDependent(this._oPreviewDialog);
+
+      }
+
+      const oHeader = new sap.m.Bar({
+        contentMiddle: [
+          new sap.m.Title({ text: "Preview" }) // Dialog title
+        ],
+        contentRight: [
+          new sap.m.Button({
+            text: data.value.length,
+            type: "Transparent",
+            icon: "sap-icon://table-view",
+            tooltip: data.value.length + ' Rows'
+          })
+        ]
       });
-    }
 
-    // Time conversion
-    const timeKeys = Object.entries(excepetedMap)
-      .filter(([_, v]) => v === "TIME")
-      .map(([k]) => k);
+      this._oPreviewDialog.setCustomHeader(oHeader);
 
-    if (timeKeys.length) {
-      jsonData.forEach(row => {
-        timeKeys.forEach(col => {
-          const timeChange = convertTime(row[col]);
-          if (timeChange) row[col] = timeChange;
+
+      this._oPreviewDialog.removeAllContent();
+      this._oPreviewDialog.addContent(oTable);
+      oTables.setBusy(false);
+
+      this._oPreviewDialog.open();
+    },
+
+
+
+    onClosePreview: function () {
+      this._oPreviewDialog.close();
+    },
+
+    // Button clicks
+    onActionPress: async function (oEvent) {
+      const oButton = oEvent.getSource();
+
+      const actionType = oButton.getCustomData().find(d => d.getKey() === "action").getValue();
+
+
+
+      const oTable = this.byId("dashboardTable");
+      const aSelectedIndices = oTable.getSelectedIndices();
+
+      if (aSelectedIndices.length !== 1) {
+        sap.m.MessageToast.show(`Please select any one row to ${actionType}.`);
+        return;
+      }
+
+      const oRowData = oTable.getContextByIndex(aSelectedIndices[0]).getObject();
+      const selectedId = oRowData.ID;
+
+      if (oRowData.STATUS != "pending") {
+
+        sap.m.MessageBox.error("Action already taken (" + oRowData.STATUS + "). You cannot perform this action again.");
+        return;
+      }
+
+      this._pendingAction = {
+        id: selectedId,
+        type: actionType,
+        module: oRowData.MODULE_NAME,
+      };
+
+      // Create popup if not created already
+      if (!this._oCommentDialog) {
+        this._oCommentDialog = new sap.m.Dialog({
+          title: "",
+          type: "Message",
+          content: [
+            new sap.m.Text("commentDialogText", {
+              text: "Please enter your comments (max 300 characters):"
+            }),
+            new sap.m.TextArea("approvalComments", {
+              width: "100%",
+              maxLength: 300,
+              rows: 5,
+              placeholder: "Enter comments here..."
+            })
+          ],
+          beginButton: new sap.m.Button({
+            text: "OK",
+            press: this._onCommentDialogOK.bind(this)
+          }),
+          endButton: new sap.m.Button({
+            text: "Cancel",
+            press: function () {
+              this._oCommentDialog.close();
+            }.bind(this)
+          })
         });
+        this.getView().addDependent(this._oCommentDialog);
+      }
+
+
+      this._oCommentDialog.setTitle(`${actionType.charAt(0).toUpperCase() + actionType.slice(1)} Comments`);
+
+      sap.ui.getCore().byId("approvalComments").setValue("");
+
+      this._oCommentDialog.open();
+    },
+
+    // Separate OK handler
+    _onCommentDialogOK: async function () {
+      //anand
+      sap.ui.core.BusyIndicator.show(0);
+      const sComments = sap.ui.getCore().byId("approvalComments").getValue();
+      const oTable = this.byId("dashboardTable");
+
+      if (!this._pendingAction) {
+        sap.m.MessageToast.show("No action selected.");
+        return;
+      }
+
+      console.log(this._pendingAction)
+
+      const Model = this.getOwnerComponent().getModel();
+      const oFunction = Model.bindContext("/UpdateStatusComments(...)");
+
+      oFunction.setParameter("id", this._pendingAction.id);
+      oFunction.setParameter("action", this._pendingAction.type);
+      oFunction.setParameter("module", this._pendingAction.module);
+      oFunction.setParameter("comments", sComments);
+
+      try {
+        await oFunction.execute();
+        const oCtx = oFunction.getBoundContext();
+        const data = oCtx.getObject();
+
+        const oBindings = oTable.getBinding("rows");
+        if (oBindings) oBindings.refresh();
+
+        oTable.setBusy(false);
+        sap.ui.core.BusyIndicator.hide();
+        sap.m.MessageBox.information(data.value);
+      } catch (err) {
+        console.error(err);
+        sap.ui.core.BusyIndicator.hide();
+        sap.m.MessageToast.show("Error updating action");
+      }
+      sap.ui.core.BusyIndicator.hide();
+      this._oCommentDialog.close();
+    },
+
+    onCommentIconPress: function (oEvent) {
+      var oSource = oEvent.getSource();
+      var sId = oSource.getCustomData()[0].getValue();
+      var oModel = this.getOwnerComponent().getModel();
+
+      var oFunction = oModel.bindContext("/getCommentById(...)");
+      oFunction.setParameter("ID", sId);
+
+      oFunction.execute().then(function () {
+        var oCtx = oFunction.getBoundContext();
+        var data = oCtx.getObject();
+
+        var sCommentText = data.comments || "";
+        var sActionBy = data.actionBy || "NA";
+
+        // Create a new dialog instance every time
+        var oDialog = new sap.m.Dialog({
+          title: "Comments",
+          contentWidth: "420px",
+          resizable: false,
+          draggable: true,
+          content: new sap.m.VBox({
+            items: [
+              new sap.m.Panel({
+                expandable: false,
+                content: [
+                  new sap.m.TextArea({
+                    value: sCommentText,
+                    width: "100%",
+                    rows: 5,
+                    editable: false
+                  }),
+
+
+                  new sap.m.Toolbar({
+                    content: [
+
+                      new sap.m.ToolbarSpacer(), // pushes button to right
+                      new sap.m.Button({
+                        text: sActionBy,
+                        type: "Transparent",
+                        icon: "sap-icon://hr-approval",
+                        press: this.copyToClipboard.bind(this),
+                        tooltip: sActionBy
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          }),
+          beginButton: new sap.m.Button({
+            text: "Close",
+            type: "Emphasized",
+            press: function () {
+              oDialog.close();
+            }
+          }),
+          afterClose: function () {
+            oDialog.destroy(); // cleanup
+          }
+        });
+
+        this.getView().addDependent(oDialog);
+        oDialog.open();
+
+      }.bind(this)).catch(function (oError) {
+        console.error("Error fetching comment:", oError);
       });
+    },
+
+    copyToClipboard: function (oEvent) {
+      var sText = oEvent.getSource().getText();  // get button text
+
+      try {
+        // Try navigator.clipboard first (modern)
+        navigator.clipboard.writeText(sText).then(function () {
+          sap.m.MessageToast.show("Copied to clipboard");
+        }).catch(function (err) {
+          // Fallback for Work Zone or restricted environments
+          var oInput = document.createElement("input");
+          oInput.value = sText;
+          document.body.appendChild(oInput);
+          oInput.select();
+          document.execCommand("copy");
+          document.body.removeChild(oInput);
+          sap.m.MessageToast.show("Copied to clipboard");
+        });
+      } catch (e) {
+        sap.m.MessageBox.error("Copy not supported in this environment");
+      }
+
+    },
+
+    onRefreshMaker: function () {
+      const oTable = this.byId("fileTable");
+      const oBindings = oTable.getBinding("rows");
+
+      if (oBindings) {
+        oTable.setBusyIndicatorDelay(0); // optional: remove delay
+        oBindings.refresh();
+
+        oBindings.attachEventOnce("dataReceived", function () {
+          oTable.setBusy(false);
+        });
+      }
+    },
+
+    onRefreshChecker: function () {
+      const oTable = this.byId("dashboardTable");
+      const oBindings = oTable.getBinding("rows");
+
+      if (oBindings) {
+        oTable.setBusyIndicatorDelay(0); // optional: remove delay
+        oBindings.refresh();
+
+        oBindings.attachEventOnce("dataReceived", function () {
+          oTable.setBusy(false);
+        });
+      }
     }
 
-    const strJson = JSON.stringify(jsonData);
 
-    /* =====================================================
-       🔴 NEW CHANGE #1: INSERT JSON INTO DUMMY TABLE
-       ===================================================== */
-    await INSERT.into('com.scb.fileupload.master.ReportFileDummy')
-      .entries({
-        ID: uuid,
-        JSON_DATA: strJson
-      });
+  });
 
-    /* =====================================================
-       🔴 NEW CHANGE #2: CALL GENERIC DATA VALIDATOR
-       ===================================================== */
-    const validatorResult = await db.run(`
-      CALL GENERIC_DATA_VALIDATOR(
-        '${uuid}',
-        '${reportFileStorageItem.MODULE_NAME}',
-        '${reportFileStorageItem.SUB_MODULE_NAME}',
-        '${reportFileStorageItem.LOAD_TEMPLATE}',
-        ?, ?
-      )
-    `);
-
-    const { O_STATUS, O_MESSAGE } = validatorResult[0];
-
-    /* =====================================================
-       🔴 NEW CHANGE #3: HANDLE FAILURE
-       ===================================================== */
-    if (O_STATUS === 'E') {
-      await DELETE.from('com.scb.fileupload.master.ReportFileDummy')
-        .where({ ID: uuid });
-
-      return req.error(400, O_MESSAGE);
-    }
-
-    /* =====================================================
-       🔴 NEW CHANGE #4: MOVE DATA TO MAIN TABLE ON SUCCESS
-       ===================================================== */
-    await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-      .set({ JSON_DATA: strJson })
-      .where({ ID: uuid });
-
-    await DELETE.from('com.scb.fileupload.master.ReportFileDummy')
-      .where({ ID: uuid });
-
-    return { ID: uuid };
-
-  } catch (err) {
-    console.error('Error during file upload:', err);
-    req.error(500, 'Failed to store file record.');
-  }
-
-  /* ================= HELPER FUNCTIONS (UNCHANGED) ================= */
-
-  function convertTime(value) {
-    if (!value) return "";
-
-    if (typeof value === "number" && value >= 0 && value < 1) {
-      const totalSeconds = Math.round(value * 86400);
-      const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
-      const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-      const ss = String(totalSeconds % 60).padStart(2, "0");
-      return `${hh}:${mm}:${ss}`;
-    }
-
-    const str = String(value).trim();
-
-    if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(str)) return str + ":00";
-    if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(str)) return str;
-    if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d+$/.test(str))
-      return str.split(".")[0];
-
-    const ampmMatch = str.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
-    if (ampmMatch) {
-      let [_, h, m, ampm] = ampmMatch;
-      h = Number(h);
-      if (ampm.toUpperCase() === "PM" && h !== 12) h += 12;
-      if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
-      return `${String(h).padStart(2, "0")}:${m}:00`;
-    }
-
-    const tryParse = new Date("1970-01-01T" + str);
-    if (!isNaN(tryParse.getTime()))
-      return tryParse.toISOString().split("T")[1].substring(0, 8);
-
-    return "";
-  }
-
-  function Datechange(value) {
-    if (!value) return "";
-
-    if (typeof value === "number") {
-      const excelDate = new Date((value - 25569) * 86400 * 1000);
-      if (isNaN(excelDate.getTime())) return "";
-      return excelDate.toISOString().split("T")[0];
-    }
-
-    const parsed = new Date(value);
-    if (!isNaN(parsed.getTime()))
-      return parsed.toISOString().split("T")[0];
-
-    value = String(value).trim();
-    const match = value.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})$/);
-
-    if (match) {
-      const [, dd, mm, yyyy] = match;
-      const iso = `${yyyy}-${mm}-${dd}`;
-      const d = new Date(iso);
-      if (!isNaN(d.getTime())) return iso;
-    }
-    return "";
-  }
 });
+
