@@ -1,13 +1,123 @@
-jquery-dbg.js:10224 
- 
- POST https://port35067-workspaces-ws-bfwue.ap11.applicationstudio.cloud.sap/service/ReportFileStorage 500 (Internal Server Error)
-Log-dbg.js:497 
- 2026-01-10 18:06:43.270399 POST on 'ReportFileStorage' failed; will be repeated automatically - Failed to store file record.
-Error: Communication error: 500 Internal Server Error
-    at Object.createError (https://sapui5.hana.ondemand.com/1.138.0/resources/sap/ui/core/library-preload.js:2334:3891)
-    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap/ui/core/library-preload.js:2364:20629)
-    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1198:9657)
-    at u (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:25639)
-    at Object.fireWith [as rejectWith] (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:26474)
-    at k (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:84147)
-    at XMLHttpRequest.<anonymous> (https://sapui5.hana.ondemand.com/1.138.0/resources/sap-ui-core.js:1244:86804) sap.ui.model.odata.v4.ODataListBinding
+srv.on('CREATE', 'ReportFileStorage', async (req) => {
+  const tx = cds.tx(req);
+
+  try {
+    /* --------------------------------------------------
+       1️⃣ CREATE EMPTY REPORT FILE STORAGE ROW
+       -------------------------------------------------- */
+    const created = await tx.create(
+      'com.scb.fileupload.master.ReportFileStorage'
+    ).entries(req.data);
+
+    const uuid = created?.ID || req.data.ID;
+
+    /* --------------------------------------------------
+       2️⃣ READ FILE CONTENT
+       -------------------------------------------------- */
+    const fileRow = await tx.run(
+      SELECT.one
+        .from('com.scb.fileupload.master.ReportFileStorage')
+        .columns('FILE_CONTENT', 'MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
+        .where({ ID: uuid })
+    );
+
+    if (!fileRow) {
+      return req.error(404, 'File not found');
+    }
+
+    const streamToBuffer = async (stream) => {
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      return Buffer.concat(chunks);
+    };
+
+    const buffer = await streamToBuffer(fileRow.FILE_CONTENT);
+
+    /* --------------------------------------------------
+       3️⃣ EXCEL → JSON
+       -------------------------------------------------- */
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
+    const strJson = JSON.stringify(jsonData);
+
+    /* --------------------------------------------------
+       4️⃣ CLEAN + INSERT INTO DUMMY
+       -------------------------------------------------- */
+    await tx.run(
+      DELETE.from('com.scb.fileupload.master.Dummy').where({ ID: uuid })
+    );
+
+    await tx.run(
+      INSERT.into('com.scb.fileupload.master.Dummy').entries({
+        ID: uuid,
+        JSON_DATA: strJson
+      })
+    );
+
+    /* --------------------------------------------------
+       5️⃣ CALL GENERIC DATA VALIDATOR (PROC)
+       -------------------------------------------------- */
+    const procResult = await tx.run(`
+      DO BEGIN
+        DECLARE v_status NVARCHAR(1);
+        DECLARE v_message NVARCHAR(2000);
+
+        CALL GENERIC_DATA_VALIDATOR(
+          '${uuid}',
+          '${fileRow.MODULE_NAME}',
+          '${fileRow.SUB_MODULE_NAME}',
+          '${fileRow.LOAD_TEMPLATE}',
+          v_status,
+          v_message
+        );
+
+        SELECT :v_status AS STATUS, :v_message AS MESSAGE FROM DUMMY;
+      END;
+    `);
+
+    const { STATUS, MESSAGE } = procResult[0];
+
+    /* --------------------------------------------------
+       6️⃣ BUSINESS FAILURE → 400
+       -------------------------------------------------- */
+    if (STATUS === 'E') {
+      await tx.run(
+        DELETE.from('com.scb.fileupload.master.Dummy').where({ ID: uuid })
+      );
+      return req.error(400, MESSAGE);
+    }
+
+    /* --------------------------------------------------
+       7️⃣ SUCCESS → MOVE JSON TO MAIN TABLE
+       -------------------------------------------------- */
+    const updated = await tx.run(
+      UPDATE('com.scb.fileupload.master.ReportFileStorage')
+        .set({ JSON_DATA: strJson })
+        .where({ ID: uuid })
+    );
+
+    if (updated === 0) {
+      return req.error(500, 'Failed to update JSON data');
+    }
+
+    /* --------------------------------------------------
+       8️⃣ CLEANUP DUMMY
+       -------------------------------------------------- */
+    await tx.run(
+      DELETE.from('com.scb.fileupload.master.Dummy').where({ ID: uuid })
+    );
+
+    return { ID: uuid };
+
+  } catch (err) {
+    console.error('CREATE ReportFileStorage failed:', err);
+
+    // Preserve business errors (400)
+    if (err.statusCode) {
+      throw err;
+    }
+
+    return req.error(500, 'Failed to store file record.');
+  }
+});
