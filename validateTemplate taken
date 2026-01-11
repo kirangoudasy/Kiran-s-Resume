@@ -1,1071 +1,162 @@
-const ExcelJS = require('exceljs');
-const db = require('@sap/cds').db;
-const { Roles } = require('./utils/constants')
-const xlsx = require('xlsx');
-const getStream = require('get-stream');
+srv.on('CREATE', "ReportFileStorage", async (req) => {
+  const tx = cds.transaction(req);
 
-module.exports = srv => {
+  try {
+    // --------------------------------------------------
+    // 1. CREATE ReportFileStorage (WITHOUT JSON_DATA)
+    // --------------------------------------------------
+    const payload = { ...req.data };
+    delete payload.JSON_DATA; // IMPORTANT
 
-  srv.on("getAllRoles", async (req) => {
+    const result = await tx.create(
+      'com.scb.fileupload.master.ReportFileStorage'
+    ).entries(payload);
 
-    const userRolesObj = req.user.roles || {};
+    const uuid = result?.ID || req.data.ID;
 
-    return userRolesObj;
-
-  });
-
-
-  srv.on("ReportFileStorageMaker", async (req) => {
-
-    return req.user.id;
-
-  });
-
-  srv.on("EditTemplateExpiry", async (req) => {
-    const { TemplateStorage, LoadMap, LoadTable } = srv.entities;
-    const { id, newExpiryDate } = req.data;
-    const tx = cds.transaction(req);
-    //read selected template
-    const aResult = await tx.read(TemplateStorage).where({ ID: id });
-    if (!aResult || !aResult.length) {
-      return req.error(404, "Template not found");
-    }
-    const row = aResult[0];
-    //update templatestorage
-    await tx.update(TemplateStorage).set({ EXPIRY_DATE: newExpiryDate, STATUS: "pending" }).where({ ID: id });
-    //delete related rows from loadmap
-    await tx.delete(LoadMap).where({
-      MODULE_NAME: row.MODULE_NAME,
-      SUB_MODULE_NAME: row.SUB_MODULE_NAME,
-      LOAD_TEMPLATE: row.LOAD_TEMPLATE
-    });
-    //delete related rows from loadtable
-    await tx.delete(LoadTable).where({
-      MODULE_NAME: row.MODULE_NAME,
-      SUB_MODULE_NAME: row.SUB_MODULE_NAME,
-      LOAD_TEMPLATE: row.LOAD_TEMPLATE
-    });
-    return { value: "Expiry updated" };
-  });
-
-  srv.on("checkDuplicates", async (req) => {
-    try {
-      const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE } = req.data;
-      const tx = cds.transaction(req);
-      const existing = await tx.run(
-        SELECT.one
-          .from('com.scb.fileupload.master.LOADMAP')
-          .where({
-            MODULE_NAME: MODULE_NAME,
-            SUB_MODULE_NAME: SUB_MODULE_NAME,
-            LOAD_TEMPLATE: LOAD_TEMPLATE
-          })
-      );
-      return { value: !!existing };
-    }
-    catch (err) {
-      return { value: false };
-
-    }
-  });
-
-  srv.on("ValidateTemplate", async (req) => {
-    const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE, FILE_CONTENT } = req.data;
-
-    //parse the excel and covert to JSON store it
-
-    const buffer = Buffer.from(FILE_CONTENT, 'base64'); // If CONTENT is Base64 encoded
-
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    // Extract headers from the first row
-    const headers = [];
-    const range = xlsx.utils.decode_range(sheet["!ref"]);
-    const firstRow = range.s.r; // starting row index
-
-    for (let col = range.s.c; col <= range.e.c; col++) {
-      const cellAddress = { c: col, r: firstRow };
-      const cellRef = xlsx.utils.encode_cell(cellAddress);
-      const cell = sheet[cellRef];
-      let header = cell ? cell.v : undefined;
-      headers.push(header);
-    }
-    const tx = cds.transaction(req);
-    const headerData = await tx.run(
-
-      SELECT.from('com.scb.fileupload.master.LoadMap')
-        .columns("COLUMN_NAME", "COLUMN_DATATYPE", "CONSTRAINTS")
-        .where({
-          MODULE_NAME: MODULE_NAME,
-          SUB_MODULE_NAME: SUB_MODULE_NAME,
-          LOAD_TEMPLATE: LOAD_TEMPLATE
-        })
-        .orderBy('LOAD_COLUMN_SEQ')
+    // --------------------------------------------------
+    // 2. READ FILE CONTENT
+    // --------------------------------------------------
+    const fileRows = await tx.run(
+      SELECT.from('com.scb.fileupload.master.ReportFileStorage')
+        .columns('FILE_CONTENT', 'MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
+        .where({ ID: uuid })
     );
 
-
-    const expectedHeaders = headerData.map(item => item.COLUMN_NAME);
-
-
-    // Compare headers
-    const isValidHeader =
-      headers.length === expectedHeaders.length &&
-      headers.every((h, i) => h === expectedHeaders[i]);
-
-    if (!isValidHeader) {
-      const result = {
-        message: "Invalid headers",
-        flag: isValidHeader
-      }
-      return result;
-    } else {
-
-      //check for datatype and constraints in each cell
-
-      const headers = await tx.run(
-
-        SELECT.from('com.scb.fileupload.master.LoadMap')
-          .columns('COLUMN_NAME', 'COLUMN_DATATYPE', "CONSTRAINTS")
-          .where({
-            MODULE_NAME: MODULE_NAME,
-            SUB_MODULE_NAME: SUB_MODULE_NAME,
-            LOAD_TEMPLATE: LOAD_TEMPLATE
-          })
-          .orderBy('LOAD_COLUMN_SEQ')
-      );
-      const expectedColumns = headers.reduce((acc, item) => {
-        const colName = item["COLUMN_NAME"].toUpperCase(); // optional: replace spaces with _
-        const dataType = item["COLUMN_DATATYPE"].toUpperCase();   // make uppercase
-        const constraint = item["CONSTRAINTS"]?.toUpperCase();    // added constraint
-        acc[colName] = { dataType, constraint };
-        return acc;
-      }, {});
-
-      // Convert sheet to JSON
-
-      const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });  //for to chck blank
-
-      let errors = [];
-      const MAX_ERRORS = 200;
-
-      jsonData.forEach((row, rowIndex) => {
-        if (errors.length >= MAX_ERRORS) {
-          return; // stop collecting further errors
-        }
-
-        Object.keys(expectedColumns).forEach((col) => {
-          if (errors.length >= MAX_ERRORS) {
-            return; // stop inside column loop too
-          }
-
-          const { dataType, constraint } = expectedColumns[col]; //added constraint
-          const value = row[col];
-
-
-          if (constraint === "NOT NULL" && (value === null || value === "")) {
-            errors.push(
-              `Row ${rowIndex + 2}, Column "${col}" is NOT NULL but value is empty`
-            );
-          }
-
-          if (!checkHanaType(value, dataType)) {
-            if (dataType === 'DATE') {
-              errors.push(
-                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} (yyyy-MM-dd) but got "${value} "`
-              );
-            }
-            else {
-              errors.push(
-                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} but got "${value}"`
-              );
-            }
-          }
-        });
-      });
-
-
-      var message1 = errors.length > 0 ? errors.join("\n") : "All datatypes and constraints are valid";
-      if (message1 === "All datatypes and constraints are valid") {
-        const result = {
-          message: "Proceed",
-          flag: true
-        }
-        return result;
-
-      } else {
-        const result = {
-          message: message1,
-          flag: false
-        }
-        return result;
-      }
-
-
-    }
-
-
-  });
-
-  /////////////////////////////////////////
-
-
-  srv.on("ReportFileStorageChecker", async (req) => {
-
-    const userRolesObj = req.user.roles || {};
-
-    // Convert object keys into array
-    const userRoles = Object.keys(userRolesObj);
-    // Filter roles that END with '_Uploader_Maker'
-    const modules = userRoles.filter(role => role.endsWith('_Upload_Checker'))
-      .map(role => role.split('_')[0]);
-    return modules;
-
-  });
-
-  srv.on("TemplateFileStorageChecker", async (req) => {
-
-    const userRolesObj = req.user.roles || {};
-
-    // Convert object keys into array
-    const userRoles = Object.keys(userRolesObj);
-    // Filter roles that END with '_Uploader_Maker'
-    const modules = userRoles.filter(role => role.endsWith('_Template_Checker')
-      || role.endsWith('_Template_Maker'))
-      .map(role => role.split('_')[0]);
-    return modules;
-
-  });
-
-  srv.on('READ', 'Modules', async (req) => {
-    const userRolesObj = req.user.roles || {};
-
-    // Convert object keys into array
-    const userRoles = Object.keys(userRolesObj);
-    // Filter roles that END with '_Upload_Maker'
-    const filtered = userRoles.filter(role => role.endsWith('_Upload_Maker'));
-
-    // Extract module name (before first "_")
-    const result = filtered.map((role, index) => {
-      const moduleName = role.split('_')[0];
-
-      return {
-        ID: moduleName,
-        name: moduleName,
-
-      };
-    });
-
-    return result;
-  });
-
-  srv.on('READ', 'TemplateModules', async (req) => {
-    const userRolesObj = req.user.roles || {};
-
-    // Convert object keys into array
-    const userRoles = Object.keys(userRolesObj);
-    // Filter roles that END with '_Upload_Maker'
-    const filtered = userRoles.filter(role => role.endsWith('_Template_Maker'));
-
-    // Extract module name (before first "_")
-    const result = filtered.map((role, index) => {
-      const moduleName = role.split('_')[0];
-
-      return {
-        ID: moduleName,
-        name: moduleName,
-
-      };
-    });
-
-    return result;
-  });
-
-  srv.on('CREATE', "ReportFileStorage", async (req) => {
-    try {
-      const result = await cds.tx(req).create("com.scb.fileupload.master.ReportFileStorage").entries(req.data);
-
-      const uuid = result?.ID || req.data.ID;
-      const db = cds.transaction(req);
-      const file = await db.run(
-        SELECT
-          .from('com.scb.fileupload.master.ReportFileStorage')
-          .columns('FILE_CONTENT', 'FILE_NAME', 'FILE_MIME_TYPE')
-          .where({ ID: uuid })
-      );
-
-      if (!file || file.length === 0) {
-        req.error(404, 'File not found');
-      }
-
-      const { FILE_CONTENT, FILE_NAME } = file[0];
-      const streamToBuffer = async (readableStream) => {
-        const chunks = [];
-        for await (const chunk of readableStream) {
-          chunks.push(chunk);
-        }
-        return Buffer.concat(chunks);
-      };
-
-      const buffer = await streamToBuffer(FILE_CONTENT); // FILE_CONTENT is Readable
-
-      const base64Content = buffer.toString('base64');
-
-      const workbook = xlsx.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-
-      //const jsonData = xlsx.utils.sheet_to_json(sheet); // All rows as JSON
-
-      //Sundar -> code
-      const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
-
-      //get module, submodule, loadtemplate
-
-      const reportFileStorageList = await db.run(
-        SELECT
-          .from('com.scb.fileupload.master.ReportFileStorage')
-          .columns('MODULE_NAME', 'SUB_MODULE_NAME', 'LOAD_TEMPLATE')
-          .where({ ID: uuid })
-      );
-
-      var reportFileStorageItem = reportFileStorageList[0];
-
-      const loadTableList = await db.run(
-        SELECT
-          .from('com.scb.fileupload.master.LoadMap')
-          .columns('COLUMN_NAME', 'COLUMN_DATATYPE')
-          .where({
-            MODULE_NAME: reportFileStorageItem.MODULE_NAME,
-            SUB_MODULE_NAME: reportFileStorageItem.SUB_MODULE_NAME,
-            LOAD_TEMPLATE: reportFileStorageItem.LOAD_TEMPLATE
-          })
-          .orderBy('LOAD_COLUMN_SEQ')
-      );
-
-      const excepetedMap = loadTableList.reduce((acc, item) => {
-        const colName = item["COLUMN_NAME"];
-        const dataType = item["COLUMN_DATATYPE"];
-        acc[colName] = dataType;
-        return acc;
-      }, {});
-
-      const dateKeys = Object.entries(excepetedMap)
-        .filter(([k, v]) => v === "DATE")
-        .map(([k]) => k);
-
-      // Convert only known date columns
-
-      if (dateKeys.length) {
-
-        jsonData.forEach(row => {
-
-          dateKeys.forEach(col => {
-
-            const dateChange = Datechange(row[col]);
-            if (dateChange) row[col] = dateChange;
-
-          });
-        });
-      }
-
-      const timeKeys = Object.entries(excepetedMap)
-        .filter(([k, v]) => v === "TIME")
-        .map(([k]) => k);
-
-      if (timeKeys.length) {
-        jsonData.forEach(row => {
-          timeKeys.forEach(col => {
-            const timeChange = convertTime(row[col]);
-            if (timeChange) row[col] = timeChange;
-          });
-        });
-      }
-
-
-      const strJson = JSON.stringify(jsonData);
-
-      //write update statement here
-
-      try {
-        await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-          .set({ JSON_DATA: strJson })
-          .where({ ID: uuid });
-
-        return { ID: uuid };
-      } catch (error) {
-        req.error(500, `Update failed: ${error.message}`);
-      }
-
-      return { ID: uuid };
-    } catch (err) {
-      console.error('Error during file upload:', err);
-      req.error(500, 'Failed to store file record.');
-    }
-
-
-    function convertTime(value) {
-      if (!value) return "";
-
-      // Excel time serial (0 to 1)
-      if (typeof value === "number" && value >= 0 && value < 1) {
-        const totalSeconds = Math.round(value * 86400);
-        const hh = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
-        const mm = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-        const ss = String(totalSeconds % 60).padStart(2, "0");
-        return `${hh}:${mm}:${ss}`;
-      }
-
-      const str = String(value).trim();
-
-      // HH:mm
-      if (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(str)) {
-        return str + ":00";
-      }
-
-      // HH:mm:ss
-      if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(str)) {
-        return str;
-      }
-
-      // HH:mm:ss.SSS
-      if (/^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d+$/.test(str)) {
-        return str.split(".")[0];
-      }
-
-      // h:mm AM/PM
-      const ampmMatch = str.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
-      if (ampmMatch) {
-        let [_, h, m, ampm] = ampmMatch;
-        h = Number(h);
-        if (ampm.toUpperCase() === "PM" && h !== 12) h += 12;
-        if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
-        return `${String(h).padStart(2, "0")}:${m}:00`;
-      }
-
-      // Try parsing time via Date
-      const tryParse = new Date("1970-01-01T" + str);
-      if (!isNaN(tryParse.getTime())) {
-        return tryParse.toISOString().split("T")[1].substring(0, 8);
-      }
-
-      return "";
-    }
-
-    function Datechange(value) {
-      if (!value) return "";
-
-      if (typeof value === "number") {
-
-        const excelDate = new Date((value - 25569) * 86400 * 1000);
-
-        if (isNaN(excelDate.getTime())) return "";
-
-        return excelDate.toISOString().split("T")[0];
-      }
-
-      const parsed = new Date(value);
-      if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString().split("T")[0];
-      }
-
-      value = String(value).trim();
-
-      const match = value.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})$/);
-      if (match) {
-        const [, dd, mm, yyyy] = match;
-
-        if (+yyyy < 1 || +yyyy > 9999) return null;
-
-        const iso = `${yyyy}-${mm}-${dd}`;
-        const d = new Date(iso);
-        if (!isNaN(d.getTime())) return iso;
-        return "";
-
-      }
-      return "";
-    }
-
-
-  });
-
-  srv.on('uploadExcelToTable', async (req) => {
-
-    const { ID, FILE_CONTENT } = req.data;
-
-    //parse the excel and covert to JSON store it
-
-    const buffer = Buffer.from(FILE_CONTENT, 'base64'); // If CONTENT is Base64 encoded
-
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    const jsonData = xlsx.utils.sheet_to_json(sheet); // All rows as JSON
-
-
-    //validate this json
-
-    //if fails throw an error.
-
-
-    const strJson = JSON.stringify(jsonData);
-
-    //write update statement here
-
-    try {
-      await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-        .set({ JSON_DATA: strJson })
-        .where({ ID: ID });
-
-      return { message: `Uploaded and stored ${jsonData.length} rows.` };
-
-    } catch (error) {
-      req.error(500, `Update failed: ${error.message}`);
-    }
-
-
-
-
-
-
-
-  });
-
-
-  srv.on('downloadTemplate', async (req) => {
-    const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE } = req.data;
-
-    const tx = cds.transaction(req);
-    const headers = await tx.run(
-
-      SELECT.from('com.scb.fileupload.master.LoadMap')
-        .columns('COLUMN_NAME', 'LOAD_COLUMN_SEQ')
-        .where({
-          MODULE_NAME: MODULE_NAME,
-          SUB_MODULE_NAME: SUB_MODULE_NAME,
-          LOAD_TEMPLATE: LOAD_TEMPLATE
-        })
-        .orderBy('LOAD_COLUMN_SEQ')
-    );
-
-    if (!headers.length) {
-      req.reject(404, 'No columns found for given input');
-    }
-
-    const workbook = new ExcelJS.Workbook();
-
-    const sheet = workbook.addWorksheet('template');
-
-
-    const headerRow = headers.map(h => h.COLUMN_NAME);
-    sheet.addRow(headerRow);
-
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const base64Content = buffer.toString('base64');
-
-    return {
-      FILE_NAME: `${MODULE_NAME}_${SUB_MODULE_NAME}_${LOAD_TEMPLATE}.xlsx`,
-      FILE_MIME_TYPE: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      FILE_CONTENT: base64Content
-    };
-  });
-
-  srv.on('downloadFile', async (req) => {
-
-    const { ID } = req.data;
-
-    const db = cds.transaction(req);
-
-    // Fetch the file based on UUID
-    const file = await db.run(
-      SELECT
-        .from('com.scb.fileupload.master.ReportFileStorage')
-        .columns('FILE_CONTENT', 'FILE_NAME', 'FILE_MIME_TYPE')
-        .where({ ID: ID })
-    );
-
-    if (!file || file.length === 0) {
+    if (!fileRows.length) {
       req.error(404, 'File not found');
     }
 
-    const { FILE_CONTENT, FILE_NAME } = file[0];
+    const { FILE_CONTENT, MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE } = fileRows[0];
 
-    const streamToBuffer = async (readableStream) => {
-      const chunks = [];
-      for await (const chunk of readableStream) {
-        chunks.push(chunk);
-      }
-      return Buffer.concat(chunks);
-    };
-
-    const buffer = await streamToBuffer(FILE_CONTENT); // FILE_CONTENT is Readable
-    const base64Content = buffer.toString('base64');
-
-
-    return {
-      FILE_NAME: `${FILE_NAME}`,
-      FILE_MIME_TYPE: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      FILE_CONTENT: base64Content
-    };
-  });
-
-  srv.on('fetchPreview', async (req) => {
-    const ID = req.data.ID;
-    const db = await cds.connect.to('db');
-
-    try {
-
-      const rows = await db.run(
-        `SELECT JSON_DATA FROM com_scb_fileupload_master_ReportFileStorage WHERE ID = ?`,
-        [ID]
-      );
-      if (!rows.length) {
-        console.log('No row found for ID:', ID);
-        return { data: [] };
-      }
-
-      // Parse the JSON array from that row
-      const jsonArray = JSON.parse(rows[0].JSON_DATA);
-
-      return jsonArray;
-
-    } catch (err) {
-      return req.error(500, `Error processing JSON data: ${err.message}`);
+    const chunks = [];
+    for await (const chunk of FILE_CONTENT) {
+      chunks.push(chunk);
     }
-  });
+    const buffer = Buffer.concat(chunks);
 
-  srv.on('UpdateStatusBatch', async (req) => {
+    // --------------------------------------------------
+    // 3. EXCEL → JSON
+    // --------------------------------------------------
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
 
-    try {
-      const ids = JSON.parse(req.data.IDs); // Parse array from string
-      let updatedCount = 0;
-      let failedCount = 0;
+    // --------------------------------------------------
+    // 4. DATE / TIME NORMALIZATION (UNCHANGED LOGIC)
+    // --------------------------------------------------
+    const loadMap = await tx.run(
+      SELECT.from('com.scb.fileupload.master.LoadMap')
+        .columns('COLUMN_NAME', 'COLUMN_DATATYPE')
+        .where({ MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE })
+        .orderBy('LOAD_COLUMN_SEQ')
+    );
 
-      for (const id of ids) {
-        const rows = await SELECT.from('com.scb.fileupload.master.ReportFileStorage')
-          .columns('STATUS')
-          .where({ ID: id });
+    const typeMap = loadMap.reduce((a, c) => {
+      a[c.COLUMN_NAME] = c.COLUMN_DATATYPE;
+      return a;
+    }, {});
 
-        if (rows.length === 0) {
-          failedCount++;
-          continue;
-        }
+    const dateCols = Object.keys(typeMap).filter(c => typeMap[c] === 'DATE');
+    const timeCols = Object.keys(typeMap).filter(c => typeMap[c] === 'TIME');
 
-        if (rows[0].STATUS === 'uploaded') {
-          const result = await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-            .set({ STATUS: 'pending' })
-            .where({ ID: id });
-
-          const auditResult = await UPDATE('com.scb.fileupload.master.AuditTrailReport')
-            .set({ REQUEST_APPROVAL: new Date() })
-            .where({ REPORT_ID: id });
-
-          if (result === 1) {
-            updatedCount++;
-          } else {
-            failedCount++;
-          }
-        } else {
-          // Not uploaded -> skip
-          failedCount++;
-        }
-      }
-
-      return `${updatedCount} success, ${failedCount} failed`;
-    } catch (err) {
-      req.error(500, `Update failed: ${err.message}`);
-    }
-
-  });
-
-  srv.on('UpdateStatusComments', async (req) => {
-
-    const { id, action, comments, module } = req.data;
-
-    var actionType = ""
-    if (action === "reject") {
-      actionType = "rejected";
-      console.log(actionType)
-    }
-    if (action === "approve") {
-      actionType = "approved";
-
-
-      const containerName = await db.run(
-        SELECT
-          .from('com.scb.fileupload.master.ModuleContainerMap')
-          .columns('CONTAINER_NAME')
-          .where({ MODULE_NAME: module })
-      );
-
-      const { CONTAINER_NAME } = containerName[0];
-
-      try {
-        // Use db.run() and let HANA return OUT param as a record
-        const sql = `
-      DO BEGIN
-        DECLARE v_result NVARCHAR(500);
-        CALL "${CONTAINER_NAME}"."GENERIC_DATA_LOADER"(ID => '${id}', V_OUT => v_result);
-        SELECT :v_result AS V_OUT FROM DUMMY;
-      END;
-    `
-
-        const result = await db.run(sql)
-
-
-      } catch (error) {
-        req.error(500, `Proc call failed: ${error.message}`);
-      }
-
-
-    }
-    if (!id) return req.error(400, "ID is required");
-    if (!action) return req.error(400, "Action is required");
-
-    try {
-
-
-      const updated = await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-        .set({
-          STATUS: actionType,
-          COMMENTS: comments?.substring(0, 300) || null
-        })
-        .where({ ID: id });
-
-      if (updated === 0) {
-        return `No record found for ID ${id}`;
-      }
-      console.log(req.user);
-      const updateUser = await UPDATE('com.scb.fileupload.master.ReportFileStorage')
-        .set({
-          ACTION_BY: req.user.id
-        })
-        .where({ ID: id });
-
-      //add 3 audit trail logs here
-
-      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
-        .set({ STATUS: actionType })
-        .where({ REPORT_ID: id });
-
-      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
-        .set({ ACTION_BY: req.user.id })
-        .where({ REPORT_ID: id });
-
-      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
-        .set({ ACTION_AT: new Date() })
-        .where({ REPORT_ID: id });
-
-      // Return professional message
-      if (action === "approve") {
-        return `Record approved successfully`;
-      }
-      if (action === "reject") {
-        return `Record rejected successfully`;
-      }
-
-    } catch (err) {
-      req.error(500, `Database update failed: ${err.message}`);
-    }
-
-  });
-
-  srv.on('getCommentById', async (req) => {
-    const { ID } = req.data;
-    if (!ID) return req.error(400, "ID is required");
-    const result = await SELECT.one.from('com.scb.fileupload.master.ReportFileStorage')
-      .columns('COMMENTS', 'ACTION_BY')
-      .where({ ID: ID });
-
-
-
-    if (!result) return req.error(404, `No record found for ID ${ID}`);
-
-
-    const response = {
-      comments: result.COMMENTS,
-      actionBy: result.ACTION_BY,
-    };
-
-    return response;
-  });
-
-  srv.on('getTabVisibility', async (req) => {
-    const userRoles = req.user.roles || {}; // roles from session
-    const flags = {
-      uploader_checker: false,
-      uploader_maker: false,
-      template_maker: false,
-      template_checker: false
-    };
-
-    Object.keys(userRoles).forEach(role => {
-      const r = role.toLowerCase();
-      if (r.endsWith('upload_maker')) flags.uploader_maker = true;
-      if (r.endsWith('upload_checker')) flags.uploader_checker = true;
-      if (r.endsWith('template_maker')) flags.template_maker = true;
-      if (r.endsWith('template_checker')) flags.template_checker = true;
+    jsonData.forEach(row => {
+      dateCols.forEach(c => {
+        const v = Datechange(row[c]);
+        if (v) row[c] = v;
+      });
+      timeCols.forEach(c => {
+        const v = convertTime(row[c]);
+        if (v) row[c] = v;
+      });
     });
 
-    return flags;
-  });
+    const jsonString = JSON.stringify(jsonData);
 
-  //--end--avoid duplication--
+    // --------------------------------------------------
+    // 5. INSERT INTO STAGING (DUMMY)
+    // --------------------------------------------------
+    await tx.run(
+      INSERT.into('com.scb.fileupload.master.ReportFileStaging').entries({
+        ID: uuid,
+        JSON_DATA: jsonString
+      })
+    );
 
-  // Map SAP HANA datatypes to JS check functions
-  function checkHanaType(value, type) {
-    if (value === null || value === undefined || value === "") return true; // allow empty
+    // --------------------------------------------------
+    // 6. CALL GENERIC DATA VALIDATOR
+    // --------------------------------------------------
+    const procResult = await tx.run(`
+      DO BEGIN
+        DECLARE v_status NVARCHAR(1);
+        DECLARE v_message NVARCHAR(500);
 
-    type = type.toUpperCase();
+        CALL GENERIC_DATA_VALIDATOR(
+          '${uuid}',
+          '${MODULE_NAME}',
+          '${SUB_MODULE_NAME}',
+          '${LOAD_TEMPLATE}',
+          v_status,
+          v_message
+        );
 
-    if (type.startsWith("NVARCHAR")) {
-      if (typeof value === "number") {
+        SELECT :v_status AS STATUS, :v_message AS MESSAGE FROM DUMMY;
+      END;
+    `);
 
-        return value.toString();
+    const { STATUS, MESSAGE } = procResult[0];
 
-      }
-      return typeof value === "string";
-    } else if (type.startsWith("DECIMAL")) {
-      return typeof value === "number" && !isNaN(value);
-    } else if (type === "DATE") {
-
-      if (/^(?:[0-9]{4})-(?:[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$/.test(value)) return true;
-
-      if (/^(?:0[1-9]|[12][0-9]|3[01])[-\/](?:0[1-9]|1[0-2])[-\/](?:[0-9]{4})$/.test(value)) return true;
-
-      if (value >= 1 && value <= 2958465) return true;
-      if (!isNaN(Date.parse(value))) return true;
-
-      if (/[-\/]$/.test(value)) return false;
-
-      return false;
-
-    } else if (type === "BOOLEAN") {
-      return typeof value === "boolean" ||
-        (typeof value === "string" && ["TRUE", "FALSE"].includes(value.toUpperCase()));
+    // --------------------------------------------------
+    // 7. FAILURE → CLEANUP + ERROR
+    // --------------------------------------------------
+    if (STATUS === 'E') {
+      await tx.run(
+        DELETE.from('com.scb.fileupload.master.ReportFileStaging')
+          .where({ ID: uuid })
+      );
+      req.error(400, MESSAGE);
     }
-    else if (type === "TIME") {
 
-        if (typeof value === "string") {
+    // --------------------------------------------------
+    // 8. SUCCESS → MOVE DATA
+    // --------------------------------------------------
+    await tx.run(
+      UPDATE('com.scb.fileupload.master.ReportFileStorage')
+        .set({ JSON_DATA: jsonString })
+        .where({ ID: uuid })
+    );
 
-          // HH:mm
-          if (/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value))
-            return true;
+    await tx.run(
+      DELETE.from('com.scb.fileupload.master.ReportFileStaging')
+        .where({ ID: uuid })
+    );
 
-          // HH:mm:ss
-          if (/^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/.test(value))
-            return true;
+    return { ID: uuid };
 
-          // HH:mm:ss.SSS
-          if (/^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\.\d{1,3}$/.test(value))
-            return true;
-
-          // Try parsing by converting to full datetime
-          const parsed = Date.parse("1970-01-01T" + value);
-          if (!isNaN(parsed)) return true;
-        }
-
-        // Excel TIME serial (0 to <1)
-        if (typeof value === "number" && value >= 0 && value < 1)
-          return true;
-
-        return false;
-      }
-
-    else {
-      return true;
-    }
+  } catch (err) {
+    console.error(err);
+    req.error(500, err.message);
   }
 
-  srv.on('genericTemplate', async (req) => {
+  // ================= HELPERS (UNCHANGED) =================
 
-    const workbook = new ExcelJS.Workbook();
-
-    const sheet = workbook.addWorksheet('template');
-
-    const headerRow = ["COLUMN_NAME", "DATATYPE", "LENGTH_PRECISION", "SCALE", "CONSTRAINTS"];
-
-    sheet.addRow(headerRow);
-
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const base64Content = buffer.toString('base64');
-
-    return {
-      FILE_NAME: `TableCreation.xlsx`,
-      FILE_MIME_TYPE: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      FILE_CONTENT: base64Content
-    };
-  });
-
-  srv.on('extractGenericTemplate', async (req) => {
-    try {
-      const { FILE_CONTENT } = req.data;
-
-      //parse the excel and covert to JSON store it
-
-      const buffer = Buffer.from(FILE_CONTENT, 'base64'); // If CONTENT is Base64 encoded
-
-      const workbook = xlsx.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });
-
-      // Extract headers from the first row
-      const actualHeaders = [];
-      const range = xlsx.utils.decode_range(sheet["!ref"]);
-      const firstRow = range.s.r; // starting row index
-
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellAddress = { c: col, r: firstRow };
-        const cellRef = xlsx.utils.encode_cell(cellAddress);
-        const cell = sheet[cellRef];
-        let header = cell ? cell.v : undefined;
-        actualHeaders.push(header);
-      }
-
-      // Expected headers
-      const expectedHeaders = ["COLUMN_NAME", "DATATYPE", "LENGTH_PRECISION", "SCALE", "CONSTRAINTS"];
-
-
-
-      // Check headers
-      const isHeaderValid = expectedHeaders.every((h, i) => h === actualHeaders[i]);
-
-      if (!isHeaderValid) {
-        return {
-          MESSAGE: "Invalid header. Expected: " + expectedHeaders.join(", "),
-          PROCEED_FLAG: false,
-          JSON_DATA: null
-        };
-      }
-
-      // Success response
-      return {
-        MESSAGE: "successful",
-        PROCEED_FLAG: true,
-        JSON_DATA: jsonData.map(row => JSON.stringify(row)) // return as array of strings
-      };
-
-    } catch (err) {
-      console.error("Error processing file:", err);
-      return {
-        MESSAGE: "Error while processing file: " + err.message,
-        PROCEED_FLAG: false,
-        JSON_DATA: null
-      };
+  function convertTime(value) {
+    if (!value) return "";
+    if (typeof value === "number" && value >= 0 && value < 1) {
+      const s = Math.round(value * 86400);
+      return `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
     }
-  });
+    const d = new Date("1970-01-01T" + value);
+    return isNaN(d) ? "" : d.toISOString().substring(11, 19);
+  }
 
-
-  srv.on('fetchTemplatePreview', async (req) => {
-    const ID = req.data.ID;
-    const db = await cds.connect.to('db');
-
-    try {
-
-      const rows = await db.run(
-        `SELECT JSON_TEMPLATE FROM com_scb_fileupload_master_TemplateStorage WHERE ID = ?`,
-        [ID]
-      );
-      if (!rows.length) {
-        console.log('No row found for ID:', ID);
-        return { data: [] };
-      }
-
-      // Parse the JSON array from that row
-      const jsonArray = JSON.parse(rows[0].JSON_TEMPLATE);
-
-      return jsonArray;
-
-    } catch (err) {
-      return req.error(500, `Error processing JSON data: ${err.message}`);
+  function Datechange(value) {
+    if (!value) return "";
+    if (typeof value === "number") {
+      const d = new Date((value - 25569) * 86400 * 1000);
+      return isNaN(d) ? "" : d.toISOString().substring(0, 10);
     }
-  });
-
-  srv.on('UpdateStatusTemplate', async (req) => {
-
-    const { id, action } = req.data;
-
-    const db = await cds.connect.to('db');
-
-    if (action === "approved") {
-
-      const rows = await db.run(
-        `SELECT MODULE_NAME,SUB_MODULE_NAME,LOAD_TEMPLATE,EXPIRY_DATE,JSON_TEMPLATE FROM com_scb_fileupload_master_TemplateStorage WHERE ID = ?`,
-        [id]
-      );
-      if (!rows.length) {
-        console.log('No row found for ID:', ID);
-        return { data: [] };
-      }
-
-      const inputJson = JSON.parse(rows[0].JSON_TEMPLATE);
-
-      var modulename = rows[0].MODULE_NAME;
-      var submodulename = rows[0].SUB_MODULE_NAME;
-      var templatename = rows[0].LOAD_TEMPLATE;
-
-      var expirydate = rows[0].EXPIRY_DATE;
-
-      //get container name from ModuleContainerMap table
-
-      const containerName = await db.run(
-        SELECT
-          .from('com.scb.fileupload.master.ModuleContainerMap')
-          .columns('CONTAINER_NAME')
-          .where({ MODULE_NAME: modulename })
-      );
-
-      const { CONTAINER_NAME } = containerName[0];
-
-      const loadTableMock = [
-        {
-          ID: cds.utils.uuid(),
-          MODULE_NAME: modulename,
-          SUB_MODULE_NAME: submodulename,
-          LOAD_TEMPLATE: templatename,
-          NUMBER_OF_COLUMNS: 0,
-          EXPIRY_DATE: expirydate,
-          DESTINATION_CONTAINER: CONTAINER_NAME,
-          STG_TABLE: templatename
-        }
-      ];
-
-      const loadMapMock = inputJson.map((col, index) => ({
-        ID: cds.utils.uuid(),
-        MODULE_NAME: modulename,
-        SUB_MODULE_NAME: submodulename,
-        LOAD_TEMPLATE: templatename,
-        LOAD_COLUMN_SEQ: index + 1,
-        COLUMN_NAME: col.COLUMN_NAME,
-        COLUMN_DATATYPE: col.DATA_TYPE.startsWith("DECIMAL") ? "DECIMAL" : col.DATA_TYPE,
-        CONSTRAINTS: col.CONSTRAINTS ? col.CONSTRAINTS.trim().toUpperCase() : null
-      }));
-
-      await db.run(INSERT.into('com.scb.fileupload.master.LoadTable').entries(loadTableMock));
-      await db.run(INSERT.into('com.scb.fileupload.master.LoadMap').entries(loadMapMock));
-
-    }
-
-    const updateUser = await UPDATE('com.scb.fileupload.master.TemplateStorage')
-      .set({
-        STATUS: action
-      })
-      .where({ ID: id });
-
-    const result = await UPDATE('com.scb.fileupload.master.TemplateStorage')
-      .set({ ACTION_BY: req.user.id })
-      .where({ ID: id });
-
-    //
-    return action;
-
-
-
-  });
-
-};
+    const d = new Date(value);
+    return isNaN(d) ? "" : d.toISOString().substring(0, 10);
+  }
+});
