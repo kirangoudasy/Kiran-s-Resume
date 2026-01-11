@@ -1,4 +1,4 @@
- srv.on('CREATE', "ReportFileStorage", async (req) => {
+srv.on('CREATE', "ReportFileStorage", async (req) => {
   const tx = cds.transaction(req);
 
   try {
@@ -6,7 +6,7 @@
     // 1. CREATE ReportFileStorage (WITHOUT JSON_DATA)
     // --------------------------------------------------
     const payload = { ...req.data };
-    delete payload.JSON_DATA; // IMPORTANT
+    delete payload.JSON_DATA;
 
     const result = await tx.create(
       'com.scb.fileupload.master.ReportFileStorage'
@@ -43,7 +43,7 @@
     const jsonData = xlsx.utils.sheet_to_json(sheet, { raw: true, defval: "" });
 
     // --------------------------------------------------
-    // 4. DATE / TIME NORMALIZATION (UNCHANGED LOGIC)
+    // 4. DATE / TIME NORMALIZATION (UNCHANGED)
     // --------------------------------------------------
     const loadMap = await tx.run(
       SELECT.from('com.scb.fileupload.master.LoadMap')
@@ -74,7 +74,7 @@
     const jsonString = JSON.stringify(jsonData);
 
     // --------------------------------------------------
-    // 5. INSERT INTO STAGING (DUMMY)
+    // 5. INSERT INTO DUMMY
     // --------------------------------------------------
     await tx.run(
       INSERT.into('com.scb.fileupload.master.Dummy').entries({
@@ -84,37 +84,35 @@
     );
 
     // --------------------------------------------------
-    // 6. CALL GENERIC DATA VALIDATOR
+    // 6. CALL VALIDATOR (✔ CORRECT WAY)
     // --------------------------------------------------
-    const procResult = await tx.run(`
-      DO BEGIN
-        DECLARE v_status NVARCHAR(1);
-        DECLARE v_message NVARCHAR(500);
-
-        CALL GENERIC_DATA_VALIDATOR(
-          '${uuid}',
-          '${MODULE_NAME}',
-          '${SUB_MODULE_NAME}',
-          '${LOAD_TEMPLATE}',
-          v_status,
-          v_message
-        );
-
-        SELECT :v_status AS STATUS, :v_message AS MESSAGE FROM DUMMY;
-      END;
+    await tx.run(`
+      CALL GENERIC_DATA_VALIDATOR(
+        '${uuid}',
+        '${MODULE_NAME}',
+        '${SUB_MODULE_NAME}',
+        '${LOAD_TEMPLATE}',
+        ?, ?
+      )
     `);
 
-    const { STATUS, MESSAGE } = procResult[0];
+    const procResult = await tx.run(`
+      SELECT O_STATUS AS STATUS, O_MESSAGE AS MESSAGE FROM DUMMY
+    `);
+
+    const STATUS = procResult[0]?.STATUS;
+    const MESSAGE = procResult[0]?.MESSAGE;
 
     // --------------------------------------------------
-    // 7. FAILURE → CLEANUP + ERROR
+    // 7. FAILURE → CLEANUP
     // --------------------------------------------------
     if (STATUS === 'E') {
       await tx.run(
         DELETE.from('com.scb.fileupload.master.Dummy')
           .where({ ID: uuid })
       );
-      return{
+
+      return {
         STATUS: 'E',
         MESSAGE: MESSAGE
       };
@@ -134,14 +132,18 @@
         .where({ ID: uuid })
     );
 
-    return { ID: uuid };
+    return {
+      STATUS: 'S',
+      MESSAGE: MESSAGE,
+      ID: uuid
+    };
 
   } catch (err) {
     console.error(err);
     req.error(500, err.message);
   }
 
-  // ================= HELPERS (UNCHANGED) =================
+  // ================= HELPERS =================
 
   function convertTime(value) {
     if (!value) return "";
