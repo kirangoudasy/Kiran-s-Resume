@@ -16,4 +16,18 @@ const procResult = await tx.run(`
   END;
 `);
 
-const { STATUS, MESSAGE } = procResult[0];
+let STATUS = 'E';
+let MESSAGE = 'Unknown validation error';
+
+if (Array.isArray(procResult) && procResult.length > 0) {
+  STATUS = procResult[0].STATUS;
+  MESSAGE = procResult[0].MESSAGE;
+}
+
+if (STATUS === 'E') {
+  await tx.run(
+    DELETE.from('com.scb.fileupload.master.Dummy')
+      .where({ ID: uuid })
+  );
+  return { STATUS, MESSAGE };
+}
