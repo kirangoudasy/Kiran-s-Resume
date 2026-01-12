@@ -1,10 +1,6 @@
-// STEP-1 : use same ID and INSERT it explicitly
+// STEP-1 : Generate validation ID (because UI doesn't have one yet)
 
-const key = req.data.ID;
-
-if (!key) {
-  return req.error(400, "ID is mandatory for validation");
-}
+const key = cds.utils.uuid();   // <-- THIS IS REQUIRED
 
 await cds.transaction(req).run(
   INSERT.into('com.scb.fileupload.master.DataValidator').entries({
@@ -13,4 +9,4 @@ await cds.transaction(req).run(
   })
 );
 
-console.log("Validation ID:", key);
+console.log("Generated Validation ID:", key);
