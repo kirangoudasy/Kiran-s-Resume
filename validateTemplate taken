@@ -1,12 +1,39 @@
-// STEP-1 : Generate validation ID (because UI doesn't have one yet)
+//step -2 run the proc to find if all good
 
-const key = cds.utils.uuid();   // <-- THIS IS REQUIRED
+        const db = await cds.connect.to('db');
 
-await cds.transaction(req).run(
-  INSERT.into('com.scb.fileupload.master.DataValidator').entries({
-    ID: key,
-    JSON_DATA: jsonData
-  })
-);
+        const callProcSQL = `
+          CALL "GENERIC_DATA_VALIDATOR"(
+            P_ID            => '${key}',
+            P_MODULE        => '${MODULE_NAME}',
+            P_SUB_MODULE    => '${SUB_MODULE_NAME}',
+            P_LOAD_TEMPLATE=> '${LOAD_TEMPLATE}'
+          )
+        `;
 
-console.log("Generated Validation ID:", key);
+        await db.run(callProcSQL);
+
+        //step -3 proc should set up error message or valid
+
+        const procResult = await db.run(
+          SELECT
+            .from('com.scb.fileupload.master.DataValidator')
+            .columns('ERROR_MESSAGE')
+            .where({ ID: key })
+        );
+
+        //step -4 return message;
+        
+        const errorMsg = procResult?.[0]?.ERROR_MESSAGE;
+
+        if (errorMsg && errorMsg !== "[]" && errorMsg.trim() !== "") {
+          return {
+            message: errorMsg,
+            flag: false
+          };
+        }
+
+        return {
+          message: "Validation successful. No duplicates found.",
+          flag: true
+        };
