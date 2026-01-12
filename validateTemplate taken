@@ -1,86 +1,125 @@
-onUploadPress: async function () {
-  const module = this.byId("moduleComboBox").getSelectedKey();
-  const subModule = this.byId("subModuleComboBox").getSelectedKey();
-  const template = this.byId("loadTemplateComboBox").getSelectedKey();
-  const oFileUploader = this.byId("fileUploader");
-  const file = oFileUploader.getDomRef("fu").files?.[0];
+PROCEDURE "GENERIC_DATA_VALIDATOR"
+(
+    IN  P_ID            NVARCHAR(36),
+    IN  P_MODULE        NVARCHAR(100),
+    IN  P_SUB_MODULE    NVARCHAR(100),
+    IN  P_LOAD_TEMPLATE NVARCHAR(100)
+)
+LANGUAGE SQLSCRIPT
+SQL SECURITY INVOKER
+AS
 
-  if (!module || !subModule || !template || !file) {
-    sap.m.MessageBox.error("Please select all dropdowns and choose a file.");
-    return;
-  }
+   LV_TEMPLATE_SQL NVARCHAR(10000);
+   LV_COLUMNS NVARCHAR(10000);
+   LV_JSON_COLS NVARCHAR(10000);
+   LV_SELECT_COLS NVARCHAR(10000);
+   LV_SQL NVARCHAR(10000);
+   LV_TEMPLATE_ID NVARCHAR(100);
+   LV_VALID_FLAG BOOLEAN;
+   LV_COL_DEF NVARCHAR(1000);
+   LV_CREATE_SQL NVARCHAR(10000);
+   LV_DROP_SQL NVARCHAR(100);
+   LV_ROW_CNT INTEGER;
+   LV_COUNT_QUERY NVARCHAR(100);
+   LV_JSON_SQL NVARCHAR(10000);
+   LV_RESULT_NCLOB NCLOB;
 
-  const maxSize = 20 * 1024 * 1024;
-  if (file.size > maxSize) {
-    sap.m.MessageBox.error("File size exceeds 20 MB.");
-    return;
-  }
 
-  sap.ui.core.BusyIndicator.show(0);
+BEGIN
 
-  try {
-    // ---------- READ FILE ----------
-    const base64Content = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+       CREATE LOCAL TEMPORARY TABLE #TMP_UNIQUE_COLS (
+        COLUMN_NAME NVARCHAR(200),
+        DATA_TYPE   NVARCHAR(200)
+    );
 
-    const payload = {
-      MODULE_NAME: module,
-      SUB_MODULE_NAME: subModule,
-      LOAD_TEMPLATE: template,
-      FILE_NAME: file.name,
-      STATUS: "uploaded",
-      FILE_MIME_TYPE: file.type,
-      FILE_SIZE: file.size,
-      FILE_CONTENT: base64Content
-    };
+    SELECT ID INTO LV_TEMPLATE_ID FROM COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE 
+        WHERE MODULE_NAME     = :P_MODULE
+             AND SUB_MODULE_NAME = :P_SUB_MODULE
+             AND LOAD_TEMPLATE   = :P_LOAD_TEMPLATE;
 
-    // ---------- STEP 1: CREATE (runs Generic Data Validator) ----------
-    const listBinding = this.oModel.bindList("/ReportFileStorage");
-    const context = await listBinding.create(payload);
-    await context.created(); // ❌ throws if proc fails
+    LV_TEMPLATE_SQL :=
+        'INSERT INTO #TMP_UNIQUE_COLS SELECT
+            JT.COLUMN_NAME,
+            JT.DATA_TYPE
+         FROM
+         COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE
+            CROSS JOIN JSON_TABLE(
+                (SELECT JSON_TEMPLATE FROM COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE WHERE ID = ''' || :LV_TEMPLATE_ID || ''' ),
+                ''$[*]''
+                COLUMNS (
+                    COLUMN_NAME NVARCHAR(200) PATH ''$.COLUMN_NAME'' ,
+                    DATA_TYPE NVARCHAR(200) PATH ''$.DATA_TYPE'' ,
+                    IS_UNIQUE   NVARCHAR(200)       PATH ''$.IS_UNIQUE''
+                )
+            ) JT
+         WHERE
+            JT.IS_UNIQUE = ''true'' AND
+            COM_SCB_FILEUPLOAD_MASTER_TEMPLATESTORAGE.ID = ''' || :LV_TEMPLATE_ID || '''
+        ';
 
-    // ---------- STEP 2: CALL ValidateTemplate (different validation) ----------
-    const oFunction = this.oModel.bindContext("/ValidateTemplate(...)");
-    oFunction.setParameter("MODULE_NAME", module);
-    oFunction.setParameter("SUB_MODULE_NAME", subModule);
-    oFunction.setParameter("LOAD_TEMPLATE", template);
-    oFunction.setParameter("FILE_CONTENT", base64Content);
+    EXECUTE IMMEDIATE :LV_TEMPLATE_SQL;
 
-    await oFunction.execute();
-    const result = oFunction.getBoundContext().getObject();
+    SELECT STRING_AGG(
+          COLUMN_NAME || ' ' || DATA_TYPE ||
+          ' PATH ''$.' || COLUMN_NAME || '''',
+          ', '
+    )
+    INTO LV_JSON_COLS
+    FROM #TMP_UNIQUE_COLS;
 
-    if (result?.flag === false) {
-      sap.m.MessageBox.error(result.message || "Template validation failed");
-      return;
-    }
+    SELECT STRING_AGG('JT.' || COLUMN_NAME, ', ')
+    INTO LV_SELECT_COLS
+    FROM #TMP_UNIQUE_COLS;
 
-    // ---------- SUCCESS ----------
-    sap.m.MessageBox.success("File uploaded and validated successfully");
+    SELECT STRING_AGG(
+    COLUMN_NAME || ' ' || DATA_TYPE,
+    ', '
+    )
+    INTO LV_COL_DEF
+    FROM #TMP_UNIQUE_COLS;
 
-    const oTable = this.byId("fileTable");
-    const oBinding = oTable.getBinding("rows");
-    if (oBinding) oBinding.refresh();
+    LV_CREATE_SQL :=
+    'CREATE LOCAL TEMPORARY TABLE #TMP_RESULT (
+        ' || :LV_COL_DEF || ',
+        DUP_CNT INTEGER
+    )';
 
-  } catch (error) {
-    // ---------- GENERIC DATA VALIDATOR FAILED ----------
-    let message = "Upload failed";
+    EXECUTE IMMEDIATE :LV_CREATE_SQL;
 
-    if (error?.responseText) {
-      try {
-        const odataError = JSON.parse(error.responseText);
-        message =
-          odataError?.error?.message?.value ||
-          odataError?.error?.message ||
-          message;
-      } catch (e) {}
-    }
+        LV_SQL :=
+        'INSERT INTO #TMP_RESULT
+        SELECT
+            ' || :LV_SELECT_COLS || ' ,
+            COUNT(*) AS DUP_CNT
+         FROM
+         COM_SCB_FILEUPLOAD_MASTER_DATAVALIDATOR
+            CROSS JOIN JSON_TABLE(
+                (SELECT JSON_DATA FROM COM_SCB_FILEUPLOAD_MASTER_DATAVALIDATOR WHERE ID = ''' || :P_ID || ''' ),
+                ''$[*]''
+                COLUMNS (
+                   '|| :LV_JSON_COLS ||'
+                )
+            ) JT
+         WHERE
+            COM_SCB_FILEUPLOAD_MASTER_DATAVALIDATOR.ID = ''' || :P_ID || '''
+         GROUP BY
+            ' || :LV_SELECT_COLS || '
+         HAVING COUNT(*) > 1';
 
-    sap.m.MessageBox.error(message);
-  } finally {
-    sap.ui.core.BusyIndicator.hide();
-  }
-}
+    EXECUTE IMMEDIATE :LV_SQL;
+
+
+    LV_JSON_SQL :=
+        'SELECT * FROM #TMP_RESULT FOR JSON;';
+
+    EXECUTE IMMEDIATE :LV_JSON_SQL INTO LV_RESULT_NCLOB;
+
+    UPDATE COM_SCB_FILEUPLOAD_MASTER_DATAVALIDATOR 
+    SET ERROR_MESSAGE = :LV_RESULT_NCLOB
+    WHERE ID = :P_ID;
+
+    LV_DROP_SQL := 'DROP TABLE #TMP_RESULT';
+    EXECUTE IMMEDIATE :LV_DROP_SQL;
+    DROP TABLE #TMP_UNIQUE_COLS;
+
+END;
