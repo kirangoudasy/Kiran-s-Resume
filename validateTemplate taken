@@ -1,36 +1,249 @@
-// step -4 return message (user friendly)
+  srv.on("ValidateTemplate", async (req) => {
 
-if (errorMsg && errorMsg !== "[]" && errorMsg.trim() !== "") {
+    const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE, FILE_CONTENT } = req.data;
 
-  let friendlyMsg = "Duplicate records found:\n\n";
+    //parse the excel and covert to JSON store it
 
-  try {
-    const duplicates = JSON.parse(errorMsg);
+    const buffer = Buffer.from(FILE_CONTENT, 'base64'); // If CONTENT is Base64 encoded
 
-    duplicates.forEach((row, index) => {
-      friendlyMsg += `${index + 1}. `;
+    const workbook = xlsx.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
 
-      Object.keys(row).forEach(key => {
-        if (key !== "DUP_CNT") {
-          friendlyMsg += `${key}: ${row[key]}, `;
+    // Extract headers from the first row
+    const headers = [];
+    const range = xlsx.utils.decode_range(sheet["!ref"]);
+    const firstRow = range.s.r; // starting row index
+
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellAddress = { c: col, r: firstRow };
+      const cellRef = xlsx.utils.encode_cell(cellAddress);
+      const cell = sheet[cellRef];
+      let header = cell ? cell.v : undefined;
+      headers.push(header);
+    }
+    const tx = cds.transaction(req);
+    const headerData = await tx.run(
+
+      SELECT.from('com.scb.fileupload.master.LoadMap')
+        .columns("COLUMN_NAME", "COLUMN_DATATYPE", "CONSTRAINTS")
+        .where({
+          MODULE_NAME: MODULE_NAME,
+          SUB_MODULE_NAME: SUB_MODULE_NAME,
+          LOAD_TEMPLATE: LOAD_TEMPLATE
+        })
+        .orderBy('LOAD_COLUMN_SEQ')
+    );
+
+
+    const expectedHeaders = headerData.map(item => item.COLUMN_NAME);
+
+
+    // Compare headers
+    const isValidHeader =
+      headers.length === expectedHeaders.length &&
+      headers.every((h, i) => h === expectedHeaders[i]);
+
+    if (!isValidHeader) {
+      const result = {
+        message: "Invalid headers",
+        flag: isValidHeader
+      }
+      return result;
+    } else {
+
+      //check for datatype and constraints in each cell
+
+      const headers = await tx.run(
+
+        SELECT.from('com.scb.fileupload.master.LoadMap')
+          .columns('COLUMN_NAME', 'COLUMN_DATATYPE', "CONSTRAINTS")
+          .where({
+            MODULE_NAME: MODULE_NAME,
+            SUB_MODULE_NAME: SUB_MODULE_NAME,
+            LOAD_TEMPLATE: LOAD_TEMPLATE
+          })
+          .orderBy('LOAD_COLUMN_SEQ')
+      );
+      const expectedColumns = headers.reduce((acc, item) => {
+        const colName = item["COLUMN_NAME"].toUpperCase(); // optional: replace spaces with _
+        const dataType = item["COLUMN_DATATYPE"].toUpperCase();   // make uppercase
+        const constraint = item["CONSTRAINTS"]?.toUpperCase();    // added constraint
+        acc[colName] = { dataType, constraint };
+        return acc;
+      }, {});
+
+      // Convert sheet to JSON
+
+      const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });  //for to chck blank
+
+      let errors = [];
+      const MAX_ERRORS = 200;
+
+      jsonData.forEach((row, rowIndex) => {
+        if (errors.length >= MAX_ERRORS) {
+          return; // stop collecting further errors
         }
+
+        Object.keys(expectedColumns).forEach((col) => {
+          if (errors.length >= MAX_ERRORS) {
+            return; // stop inside column loop too
+          }
+
+          const { dataType, constraint } = expectedColumns[col]; //added constraint
+          const value = row[col];
+
+
+          if (constraint === "NOT NULL" && (value === null || value === "")) {
+            errors.push(
+              `Row ${rowIndex + 2}, Column "${col}" is NOT NULL but value is empty`
+            );
+          }
+
+          if (!checkHanaType(value, dataType)) {
+            if (dataType === 'DATE') {
+              errors.push(
+                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} (yyyy-MM-dd) but got "${value} "`
+              );
+            }
+            else {
+              errors.push(
+                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} but got "${value}"`
+              );
+            }
+          }
+        });
       });
 
-      friendlyMsg += `Duplicate Count: ${row.DUP_CNT}\n`;
-    });
 
-  } catch (e) {
-    // fallback if parsing fails
-    friendlyMsg = errorMsg;
-  }
+      var message1 = errors.length > 0 ? errors.join("\n") : "All datatypes and constraints are valid";
+      if (message1 === "All datatypes and constraints are valid") {
 
-  return {
-    message: friendlyMsg.trim(),
-    flag: false
-  };
-}
+        //step -1 insert into validation table generate a unique ID
 
-return {
-  message: "Validation successful. No duplicates found.",
-  flag: true
-};
+        // const entry = {
+        //   JSON_DATA: jsonData
+        // };
+
+        // const results = await cds.transaction(req).run(
+        //   INSERT.into('com.scb.fileupload.master.DataValidator').entries(entry)
+        // );
+
+        // console.log(results.results[0].values[1])
+
+        // var key = req.data.ID;
+        // console.log(key);
+
+        //step -1 insert into validation table generate a unique ID
+        
+        const key = cds.utils.uuid();   // <-- THIS IS REQUIRED
+
+        await cds.transaction(req).run(
+          INSERT.into('com.scb.fileupload.master.DataValidator').entries({
+            ID: key,
+            JSON_DATA: jsonData
+          })
+        );
+
+        console.log("Generated Validation ID:", key);
+
+        // step -2 run the proc to find if all good
+
+        const db = await cds.connect.to('db');
+
+        let errorMsg = "[]";   // default → no duplicates
+
+        try {
+          const callProcSQL = `
+            CALL "GENERIC_DATA_VALIDATOR"(
+              P_ID             => '${key}',
+              P_MODULE         => '${MODULE_NAME}',
+              P_SUB_MODULE     => '${SUB_MODULE_NAME}',
+              P_LOAD_TEMPLATE => '${LOAD_TEMPLATE}'
+            )
+          `;
+
+          await db.run(callProcSQL);
+
+          // step -3 proc should set up error message or valid
+          const procResult = await db.run(
+            SELECT
+              .from('com.scb.fileupload.master.DataValidator')
+              .columns('ERROR_MESSAGE')
+              .where({ ID: key })
+          );
+
+          errorMsg = procResult?.[0]?.ERROR_MESSAGE || "[]";
+
+        } catch (err) {
+          // handle "no data found" thrown by procedure when no duplicates exist
+          if (
+            err.message &&
+            err.message.toLowerCase().includes("no data found")
+          ) {
+            errorMsg = "[]";   // treat as valid
+          } else {
+            throw err;         // real error → fail
+          }
+        }
+
+
+        // step -4 return message (user friendly)
+
+        if (errorMsg && errorMsg !== "[]" && errorMsg.trim() !== "") {
+
+          let friendlyMsg = "Duplicate records found:\n\n";
+
+          try {
+            const duplicates = JSON.parse(errorMsg);
+
+            duplicates.forEach((row, index) => {
+              friendlyMsg += `${index + 1}. `;
+
+              Object.keys(row).forEach(key => {
+                if (key !== "DUP_CNT") {
+                  friendlyMsg += `${key}: ${row[key]}, `;
+                }
+              });
+
+              friendlyMsg += `Duplicate Count: ${row.DUP_CNT}\n`;
+            });
+
+          } catch (e) {
+            // fallback if parsing fails
+            friendlyMsg = errorMsg;
+          }
+
+          return {
+            message: friendlyMsg.trim(),
+            flag: false
+          };
+        }
+
+        return {
+          message: "Validation successful. No duplicates found.",
+          flag: true
+        };
+
+        
+
+
+        // const result = {
+        //   message: "Proceed",
+        //   flag: true
+        // }
+        // return result;
+
+      } else {
+        const result = {
+          message: message1,
+          flag: false
+        }
+        return result;
+      }
+
+
+    }
+
+
+  });
