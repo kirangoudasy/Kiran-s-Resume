@@ -1,12 +1,6 @@
-let hasIsUniqueKey = false;
-
-if (templateRow?.JSON_TEMPLATE) {
-  const jsonTemplate =
-    typeof templateRow.JSON_TEMPLATE === 'string'
-      ? JSON.parse(templateRow.JSON_TEMPLATE)
-      : templateRow.JSON_TEMPLATE;
-
-  hasIsUniqueKey = jsonTemplate.some(col =>
-    Object.prototype.hasOwnProperty.call(col, 'IS_UNIQUE')
-  );
+if (!hasIsUniqueKey) {
+  return {
+    message: "Validation successful. Uniqueness check not applicable for this template.",
+    flag: true
+  };
 }
