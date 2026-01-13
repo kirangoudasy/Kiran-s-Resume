@@ -1,10 +1,12 @@
-const templateRow = await tx.run(
-  SELECT.one
-    .from('com.scb.fileupload.master.TemplateFileStorage')
-    .columns('JSON_TEMPLATE')
-    .where({
-      MODULE_NAME,
-      SUB_MODULE_NAME,
-      LOAD_TEMPLATE
-    })
-);
+let hasIsUniqueKey = false;
+
+if (templateRow?.JSON_TEMPLATE) {
+  const jsonTemplate =
+    typeof templateRow.JSON_TEMPLATE === 'string'
+      ? JSON.parse(templateRow.JSON_TEMPLATE)
+      : templateRow.JSON_TEMPLATE;
+
+  hasIsUniqueKey = jsonTemplate.some(col =>
+    Object.prototype.hasOwnProperty.call(col, 'IS_UNIQUE')
+  );
+}
