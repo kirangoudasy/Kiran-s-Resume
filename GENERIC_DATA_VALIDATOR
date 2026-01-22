@@ -1,138 +1,17 @@
-  srv.on("ValidateTemplate", async (req) => {
-    const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE, FILE_CONTENT } = req.data;
+jquery-dbg.js:10224 
+ 
+ POST https://fin-analytical-svcs-preprod-i2zb9br3.workzone.cfapps.ap11.hana.onde…leuploader/~d69f5d9e-801a-4cf9-a0c6-9d714127f05d~/service/ValidateTemplate 502 (Bad Gateway)
+Log-dbg.js:497 
+ 2026-01-22 17:12:02.024500 Failed to invoke /ValidateTemplate(...) - 502 Bad Gateway: Registered endpoint failed to handle the request.
 
-    //parse the excel and covert to JSON store it
-
-    const buffer = Buffer.from(FILE_CONTENT, 'base64'); // If CONTENT is Base64 encoded
-
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    // Extract headers from the first row
-    const headers = [];
-    const range = xlsx.utils.decode_range(sheet["!ref"]);
-    const firstRow = range.s.r; // starting row index
-
-    for (let col = range.s.c; col <= range.e.c; col++) {
-      const cellAddress = { c: col, r: firstRow };
-      const cellRef = xlsx.utils.encode_cell(cellAddress);
-      const cell = sheet[cellRef];
-      let header = cell ? cell.v : undefined;
-      headers.push(header);
-    }
-    const tx = cds.transaction(req);
-    const headerData = await tx.run(
-
-      SELECT.from('com.scb.fileupload.master.LoadMap')
-        .columns("COLUMN_NAME", "COLUMN_DATATYPE", "CONSTRAINTS")
-        .where({
-          MODULE_NAME: MODULE_NAME,
-          SUB_MODULE_NAME: SUB_MODULE_NAME,
-          LOAD_TEMPLATE: LOAD_TEMPLATE
-        })
-        .orderBy('LOAD_COLUMN_SEQ')
-    );
-
-
-    const expectedHeaders = headerData.map(item => item.COLUMN_NAME);
-
-
-    // Compare headers
-    const isValidHeader =
-      headers.length === expectedHeaders.length &&
-      headers.every((h, i) => h === expectedHeaders[i]);
-
-    if (!isValidHeader) {
-      const result = {
-        message: "Invalid headers",
-        flag: isValidHeader
-      }
-      return result;
-    } else {
-
-      //check for datatype and constraints in each cell
-
-      const headers = await tx.run(
-
-        SELECT.from('com.scb.fileupload.master.LoadMap')
-          .columns('COLUMN_NAME', 'COLUMN_DATATYPE', "CONSTRAINTS")
-          .where({
-            MODULE_NAME: MODULE_NAME,
-            SUB_MODULE_NAME: SUB_MODULE_NAME,
-            LOAD_TEMPLATE: LOAD_TEMPLATE
-          })
-          .orderBy('LOAD_COLUMN_SEQ')
-      );
-      const expectedColumns = headers.reduce((acc, item) => {
-        const colName = item["COLUMN_NAME"].toUpperCase(); // optional: replace spaces with _
-        const dataType = item["COLUMN_DATATYPE"].toUpperCase();   // make uppercase
-        const constraint = item["CONSTRAINTS"]?.toUpperCase();    // added constraint
-        acc[colName] = { dataType, constraint };
-        return acc;
-      }, {});
-
-      // Convert sheet to JSON
-
-      const jsonData = xlsx.utils.sheet_to_json(sheet, { defval: null });  //for to chck blank
-
-      let errors = [];
-      const MAX_ERRORS = 200;
-
-      jsonData.forEach((row, rowIndex) => {
-        if (errors.length >= MAX_ERRORS) {
-          return; // stop collecting further errors
-        }
-
-        Object.keys(expectedColumns).forEach((col) => {
-          if (errors.length >= MAX_ERRORS) {
-            return; // stop inside column loop too
-          }
-
-          const { dataType, constraint } = expectedColumns[col]; //added constraint
-          const value = row[col];
-
-
-          if (constraint === "NOT NULL" && (value === null || value === "")) {
-            errors.push(
-              `Row ${rowIndex + 2}, Column "${col}" is NOT NULL but value is empty`
-            );
-          }
-
-          if (!checkHanaType(value, dataType)) {
-            if (dataType === 'DATE') {
-              errors.push(
-                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} (yyyy-MM-dd) but got "${value} "`
-              );
-            }
-            else {
-              errors.push(
-                `Row ${rowIndex + 2}, Column "${col}" expected ${dataType} but got "${value}"`
-              );
-            }
-          }
-        });
-      });
-
-
-      var message1 = errors.length > 0 ? errors.join("\n") : "All datatypes and constraints are valid";
-      if (message1 === "All datatypes and constraints are valid") {
-        const result = {
-          message: "Proceed",
-          flag: true
-        }
-        return result;
-
-      } else {
-        const result = {
-          message: message1,
-          flag: false
-        }
-        return result;
-      }
-
-
-    }
-
-
-  });
+Error: Communication error: 502 Bad Gateway
+    at Object.createError (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/ui/core/library-preload.js:2358:3822)
+    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/ui/core/library-preload.js:2388:21215)
+    at Object.<anonymous> (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/fiori/appruntime-min-1.js:580:9657)
+    at u (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/fiori/appruntime-min-1.js:626:25639)
+    at Object.fireWith [as rejectWith] (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/fiori/appruntime-min-1.js:626:26474)
+    at k (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/fiori/appruntime-min-1.js:626:84147)
+    at XMLHttpRequest.<anonymous> (https://sapui5.hana.ondemand.com/1.143.2/resources/sap/fiori/appruntime-min-1.js:626:86804) sap.ui.model.odata.v4.ODataContextBinding
+_Helper-dbg.js:603 
+ Uncaught (in promise) Error: 502 Bad Gateway: Registered endpoint failed to handle the request.
+﻿
