@@ -1,7 +1,7 @@
-5.1	Spring Rest API:
-
-Spring Boot is a Java framework, built on top of the Spring framework, used for developing web applications. It allows you to create REST APIs with minimal configurations. A few benefits of using Spring Boot for your REST APIs include:
-
-•	No requirement for complex XML configurations.
-•	Embedded Tomcat server to run Spring Boot applications.
-•	An auto-configuration feature by Spring Boot that configures your application automatically for certain dependencies. If the dependency is available in your class path, Spring Boot will auto-create the beans for it. Beans in Spring are objects that are instantiated and managed by Spring through Spring IoC containers. You don't have to create and configure the beans as Spring Boot will do it for you.
+SAP Cloud Application Programming Model (CAP) is a framework provided by SAP, used for developing enterprise-grade cloud applications on SAP BTP. It allows you to create REST/OData APIs with minimal configurations. A few benefits of using CAP for your REST APIs include:
+• No requirement for complex boilerplate code, as services and data models are defined using CDS files.
+• Built-in service runtime that exposes REST and OData endpoints automatically without manual API configuration.
+• Integrated database handling with SAP HANA, where CAP manages queries, transactions, and connections internally.
+• Automatic handling of dependency injection and lifecycle management for services, eliminating the need for manual object creation.
+• Support for custom business logic using event handlers, making it easy to implement validations, file processing, and data checks.
+This makes CAP suitable for building scalable and maintainable backend services in cloud-based enterprise applications.
