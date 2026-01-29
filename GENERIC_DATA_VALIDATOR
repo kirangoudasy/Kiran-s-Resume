@@ -1,18 +1,22 @@
-5.1.1	Spring Boot sample code
-The sample main file which allows to start our spring boot application. This application can be built as a runnable JAR and can be executed.
+5.1.2	Spring Rest Controller
+RestController is used for making restful web services with the help of the @RestController annotation. This annotation is used at the class level and allows the class to handle the requests made by the client. Let’s understand @RestController annotation using an example. The RestController allows to handle all REST APIs such as GET, POST, Delete, PUT requests. 
 
-@SpringBootApplication(scanBasePackages={"com.bcrs.*"})
-@EnableConfigurationProperties({FileStorageProperties.class,CbAdjProperties.class,GoFileStorageProperties.class,XmlMasProperties.class})
-@PropertySource({"classpath:sme-${spring.profiles.active}.properties","classpath:cbadj-${spring.profiles.active}.properties","classpath:adj-${spring.profiles.active}.properties","classpath:xmlmas-${spring.profiles.active}.properties"})
-@EnableAsync
-//@EnableCaching
-public class BcrsWebportalApplication extends org.springframework.boot.web.servlet.support.SpringBootServletInitializer {
- 
-    @Override
-    protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
-        return application.sources(BcrsWebportalApplication.class);
-    }
-    public static void main(String[] args) throws Exception {
-        SpringApplication.run(BcrsWebportalApplication.class, args);
-    }
-      }
+In the below code it uses the @GetMapping value to map the request path to the controller handler method and it get invoked. The method acts as front controller and it interacts with the service layer and sends the JSON response back to the client.
+
+        
+  @RestController
+     @RequestMapping("filemgmt")
+@CommonsLog
+public class FileManagementController {
+
+	@GetMapping("/getTemplate")
+public List<TemplateControl> getTemplateDetails(
+@RequestParam("countryCode") String countryCode,	
+@RequestParam("businessName") String businessName,	
+@RequestParam("userGroupName") String userGroupName) throws ResourceNotFoundException{
+		
+		log.debug("getTemplateDetails");
+List<TemplateControl> templateList = templateService.getTemplateDetails(countryCode,businessName,userGroupName);
+		return templateList;
+		
+	}
