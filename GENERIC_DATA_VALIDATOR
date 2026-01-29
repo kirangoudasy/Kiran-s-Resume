@@ -1,2 +1,38 @@
- CAP, RESTful services are implemented using service handlers instead of controllers. These handlers are used to process requests coming from the client and return responses in JSON format. CAP automatically exposes REST/OData endpoints based on the service definitions written in CDS.
-Service handlers can handle different types of operations such as GET, POST, PUT, and DELETE by using event-based methods like on, before, and after. The handler acts as the entry point for client requests and interacts with the database layer to fetch or process data.
+  srv.on('downloadTemplate', async (req) => {
+    const { MODULE_NAME, SUB_MODULE_NAME, LOAD_TEMPLATE } = req.data;
+
+    const tx = cds.transaction(req);
+    const headers = await tx.run(
+
+      SELECT.from('com.scb.fileupload.master.LoadMap')
+        .columns('COLUMN_NAME', 'LOAD_COLUMN_SEQ')
+        .where({
+          MODULE_NAME: MODULE_NAME,
+          SUB_MODULE_NAME: SUB_MODULE_NAME,
+          LOAD_TEMPLATE: LOAD_TEMPLATE
+        })
+        .orderBy('LOAD_COLUMN_SEQ')
+    );
+
+    if (!headers.length) {
+      req.reject(404, 'No columns found for given input');
+    }
+
+    const workbook = new ExcelJS.Workbook();
+
+    const sheet = workbook.addWorksheet('template');
+
+
+    const headerRow = headers.map(h => h.COLUMN_NAME);
+    sheet.addRow(headerRow);
+
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const base64Content = buffer.toString('base64');
+
+    return {
+      FILE_NAME: `${MODULE_NAME}_${SUB_MODULE_NAME}_${LOAD_TEMPLATE}.xlsx`,
+      FILE_MIME_TYPE: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      FILE_CONTENT: base64Content
+    };
+  });
