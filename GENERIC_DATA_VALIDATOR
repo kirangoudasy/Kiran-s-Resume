@@ -1,7 +1,18 @@
-SAP Cloud Application Programming Model (CAP) is a framework provided by SAP, used for developing enterprise-grade cloud applications on SAP BTP. It allows you to create REST/OData APIs with minimal configurations. A few benefits of using CAP for your REST APIs include:
-• No requirement for complex boilerplate code, as services and data models are defined using CDS files.
-• Built-in service runtime that exposes REST and OData endpoints automatically without manual API configuration.
-• Integrated database handling with SAP HANA, where CAP manages queries, transactions, and connections internally.
-• Automatic handling of dependency injection and lifecycle management for services, eliminating the need for manual object creation.
-• Support for custom business logic using event handlers, making it easy to implement validations, file processing, and data checks.
-This makes CAP suitable for building scalable and maintainable backend services in cloud-based enterprise applications.
+5.1.1	Spring Boot sample code
+The sample main file which allows to start our spring boot application. This application can be built as a runnable JAR and can be executed.
+
+@SpringBootApplication(scanBasePackages={"com.bcrs.*"})
+@EnableConfigurationProperties({FileStorageProperties.class,CbAdjProperties.class,GoFileStorageProperties.class,XmlMasProperties.class})
+@PropertySource({"classpath:sme-${spring.profiles.active}.properties","classpath:cbadj-${spring.profiles.active}.properties","classpath:adj-${spring.profiles.active}.properties","classpath:xmlmas-${spring.profiles.active}.properties"})
+@EnableAsync
+//@EnableCaching
+public class BcrsWebportalApplication extends org.springframework.boot.web.servlet.support.SpringBootServletInitializer {
+ 
+    @Override
+    protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
+        return application.sources(BcrsWebportalApplication.class);
+    }
+    public static void main(String[] args) throws Exception {
+        SpringApplication.run(BcrsWebportalApplication.class, args);
+    }
+      }
