@@ -1,1 +1,32 @@
-In the below example, a custom CAP service handler is used to generate and download an Excel template based on the input parameters provided by the client and return the response in JSON format.
+5.1.3	Spring Security and Authentication
+
+Spring Security
+Spring Security is a powerful and highly customizable authentication and access-control framework. It is the de-facto standard for securing Spring-based applications. Spring Security is a framework that focuses on providing both authentication and authorization to Java applications. Like all Spring projects, the real power of Spring Security is found in how easily it can be extended to meet custom requirements. Below shows the application security config.
+
+@Override
+	protected void configure(HttpSecurity http) throws Exception {
+
+		http.httpBasic().and().authorizeRequests()		
+			.antMatchers("/css/**").permitAll()
+			.antMatchers("/images/**").permitAll()
+			.antMatchers("/js/**").permitAll()
+			.antMatchers("/accessdenied").permitAll()	
+			.antMatchers("/logout").permitAll()	
+			.antMatchers("/common/**").authenticated()
+			.antMatchers("/authenticate").permitAll()
+			.antMatchers("/usermgmt/**").access("hasRole('ROLE_UserAdmin')")
+.antMatchers("/filemgmt/**").access("hasAnyRole('ROLE_User','ROLE_Approver')")
+			.antMatchers("/cbadj/**").access("hasAnyRole('ROLE_CB Adj Maker','ROLE_CB     Adj Checker')")
+.antMatchers("/xmlmas/**").access("hasAnyRole('ROLE_XML Maker','ROLE_XML Checker')")
+			.antMatchers("/adjmgmt/**").access("hasRole('ROLE_Adj Batch User')")
+.antMatchers("/report/**").permitAll()
+			.anyRequest().authenticated()
+			.and().exceptionHandling().authenticationEntryPoint(jwtEntryPoint)
+			.and().csrf().disable().headers().frameOptions().disable()			.and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
+		
+   http.addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
+}
+
+Json Web Token (JWT)
+JSON Web Token is a proposed Internet standard for creating data with optional signature and/or optional encryption whose payload holds JSON that asserts some number of claims. The tokens are signed either using a private secret or a public/private key.
+For example, a server could generate a token that has the claim "logged in as administrator" and provide that to a client. The client could then use that token to prove that it is logged in as admin. The tokens can be signed by one party's private key (usually the server's) so that any party can subsequently verify the token is legitimate. If the other party, by some suitable and trustworthy means, is in possession of the corresponding public key, they too can verify the token's legitimacy. The tokens are designed to be compact URL-safe and usable especially in a web-browser single-sign-on (SSO) context. JWT claims can typically be used to pass identity of authenticated users between an identity provider and a service provider, or any other type of claims as required by business processes. JWT relies on other JSON-based standards: JSON Web Signature and JSON Web Encryption.
