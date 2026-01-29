@@ -1,22 +1,2 @@
-5.1.2	Spring Rest Controller
-RestController is used for making restful web services with the help of the @RestController annotation. This annotation is used at the class level and allows the class to handle the requests made by the client. Let’s understand @RestController annotation using an example. The RestController allows to handle all REST APIs such as GET, POST, Delete, PUT requests. 
-
-In the below code it uses the @GetMapping value to map the request path to the controller handler method and it get invoked. The method acts as front controller and it interacts with the service layer and sends the JSON response back to the client.
-
-        
-  @RestController
-     @RequestMapping("filemgmt")
-@CommonsLog
-public class FileManagementController {
-
-	@GetMapping("/getTemplate")
-public List<TemplateControl> getTemplateDetails(
-@RequestParam("countryCode") String countryCode,	
-@RequestParam("businessName") String businessName,	
-@RequestParam("userGroupName") String userGroupName) throws ResourceNotFoundException{
-		
-		log.debug("getTemplateDetails");
-List<TemplateControl> templateList = templateService.getTemplateDetails(countryCode,businessName,userGroupName);
-		return templateList;
-		
-	}
+ CAP, RESTful services are implemented using service handlers instead of controllers. These handlers are used to process requests coming from the client and return responses in JSON format. CAP automatically exposes REST/OData endpoints based on the service definitions written in CDS.
+Service handlers can handle different types of operations such as GET, POST, PUT, and DELETE by using event-based methods like on, before, and after. The handler acts as the entry point for client requests and interacts with the database layer to fetch or process data.
