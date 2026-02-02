@@ -1,32 +1,11 @@
-5.1.3	Spring Security and Authentication
+In order to ensure that Standard Chartered remains competitive, it benchmarks itself against similar banks.  Group Financial Planning & Analytics (FP&A) does this by obtaining and analysing publicly available quarterly earnings documents released by its peers.  An analyst then prepares a report about each competitor, which is then distributed to over 600 recipients across the bank.  The primary consumers are Group FP&A, Country Finance, Investor relations, Capital, Liquidity, and IRRBB.
 
-Spring Security
-Spring Security is a powerful and highly customizable authentication and access-control framework. It is the de-facto standard for securing Spring-based applications. Spring Security is a framework that focuses on providing both authentication and authorization to Java applications. Like all Spring projects, the real power of Spring Security is found in how easily it can be extended to meet custom requirements. Below shows the application security config.
+The process is as per the following diagram:
+ 
+Figure 1
 
-@Override
-	protected void configure(HttpSecurity http) throws Exception {
+While thorough, the process is time-consuming which restricts the number of peers which can be analysed.  It also requires manual updates of financial disclosures, which can be labour-intensive and prone to inaccuracies. Although effective, the process lacks the agility needed to keep pace with the dynamic financial environment.
 
-		http.httpBasic().and().authorizeRequests()		
-			.antMatchers("/css/**").permitAll()
-			.antMatchers("/images/**").permitAll()
-			.antMatchers("/js/**").permitAll()
-			.antMatchers("/accessdenied").permitAll()	
-			.antMatchers("/logout").permitAll()	
-			.antMatchers("/common/**").authenticated()
-			.antMatchers("/authenticate").permitAll()
-			.antMatchers("/usermgmt/**").access("hasRole('ROLE_UserAdmin')")
-.antMatchers("/filemgmt/**").access("hasAnyRole('ROLE_User','ROLE_Approver')")
-			.antMatchers("/cbadj/**").access("hasAnyRole('ROLE_CB Adj Maker','ROLE_CB     Adj Checker')")
-.antMatchers("/xmlmas/**").access("hasAnyRole('ROLE_XML Maker','ROLE_XML Checker')")
-			.antMatchers("/adjmgmt/**").access("hasRole('ROLE_Adj Batch User')")
-.antMatchers("/report/**").permitAll()
-			.anyRequest().authenticated()
-			.and().exceptionHandling().authenticationEntryPoint(jwtEntryPoint)
-			.and().csrf().disable().headers().frameOptions().disable()			.and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
-		
-   http.addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
-}
+The Gen AI Peer Analysis App proposes a transformative solution by harnessing advanced AI capabilities to enhance the scope and efficiency of financial analysis. The app will save time in the preparation of peer notes, making it quicker to include detailed segment and product performance, consensus comparisons, and a breakdown of analyst questions from earnings calls, along with key management quotes. This enriched analysis will be accessible to end users, allowing them to query specific company results for further insights.
 
-Json Web Token (JWT)
-JSON Web Token is a proposed Internet standard for creating data with optional signature and/or optional encryption whose payload holds JSON that asserts some number of claims. The tokens are signed either using a private secret or a public/private key.
-For example, a server could generate a token that has the claim "logged in as administrator" and provide that to a client. The client could then use that token to prove that it is logged in as admin. The tokens can be signed by one party's private key (usually the server's) so that any party can subsequently verify the token is legitimate. If the other party, by some suitable and trustworthy means, is in possession of the corresponding public key, they too can verify the token's legitimacy. The tokens are designed to be compact URL-safe and usable especially in a web-browser single-sign-on (SSO) context. JWT claims can typically be used to pass identity of authenticated users between an identity provider and a service provider, or any other type of claims as required by business processes. JWT relies on other JSON-based standards: JSON Web Signature and JSON Web Encryption.
+The first phase of this project delivers the above functionality which is known as Peer Analysis.  Further phases include prediction of analyst questions for SCB earnings calls, as well as comparison of SCB performance against peers.
