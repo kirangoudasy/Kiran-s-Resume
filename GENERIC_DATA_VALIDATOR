@@ -1,40 +1,9 @@
 {
-	"FINSIGHT_OVERLAY": {
-		"application_user": {
-			"schema_privileges": [
-				{
-					"schema": "T1GDTL_PHY",
-					"privileges": [
-						"SELECT",
-						"SELECT METADATA",
-						"INSERT",
-						"UPDATE"
-					],
-					"privileges_with_grant_option": [
-						"SELECT",
-						"SELECT METADATA",
-						"INSERT",
-						"UPDATE"
-					]
-				}
-			]
-		},
+	"TREASURY_OVERLAY": {
 		"object_owner": {
 			"schema_privileges": [
 				{
-					"schema": "T1GDTL_PHY",
-					"privileges": [
-						"SELECT",
-						"SELECT METADATA",
-						"INSERT",
-						"UPDATE"
-					],
-					"privileges_with_grant_option": [
-						"SELECT",
-						"SELECT METADATA",
-						"INSERT",
-						"UPDATE"
-					]
+					"schema": "T1TREASURY_PHY"
 				}
 			]
 		}
