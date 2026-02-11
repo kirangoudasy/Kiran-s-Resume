@@ -1,11 +1,4 @@
-{
-	"TREASURY_OVERLAY": {
-		"object_owner": {
-			"schema_privileges": [
-				{
-					"schema": "T1TREASURY_PHY"
-				}
-			]
-		}
-	}
-}
+GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SELECT METADATA
+ON SCHEMA "T1TREASURY_PHY"
+TO "TREASURY_OVERLAY_OO"
+WITH GRANT OPTION;
