@@ -1,11 +1,42 @@
-In order to ensure that Standard Chartered remains competitive, it benchmarks itself against similar banks.  Group Financial Planning & Analytics (FP&A) does this by obtaining and analysing publicly available quarterly earnings documents released by its peers.  An analyst then prepares a report about each competitor, which is then distributed to over 600 recipients across the bank.  The primary consumers are Group FP&A, Country Finance, Investor relations, Capital, Liquidity, and IRRBB.
-
-The process is as per the following diagram:
- 
-Figure 1
-
-While thorough, the process is time-consuming which restricts the number of peers which can be analysed.  It also requires manual updates of financial disclosures, which can be labour-intensive and prone to inaccuracies. Although effective, the process lacks the agility needed to keep pace with the dynamic financial environment.
-
-The Gen AI Peer Analysis App proposes a transformative solution by harnessing advanced AI capabilities to enhance the scope and efficiency of financial analysis. The app will save time in the preparation of peer notes, making it quicker to include detailed segment and product performance, consensus comparisons, and a breakdown of analyst questions from earnings calls, along with key management quotes. This enriched analysis will be accessible to end users, allowing them to query specific company results for further insights.
-
-The first phase of this project delivers the above functionality which is known as Peer Analysis.  Further phases include prediction of analyst questions for SCB earnings calls, as well as comparison of SCB performance against peers.
+{
+	"FINSIGHT_OVERLAY": {
+		"application_user": {
+			"schema_privileges": [
+				{
+					"schema": "T1GDTL_PHY",
+					"privileges": [
+						"SELECT",
+						"SELECT METADATA",
+						"INSERT",
+						"UPDATE"
+					],
+					"privileges_with_grant_option": [
+						"SELECT",
+						"SELECT METADATA",
+						"INSERT",
+						"UPDATE"
+					]
+				}
+			]
+		},
+		"object_owner": {
+			"schema_privileges": [
+				{
+					"schema": "T1GDTL_PHY",
+					"privileges": [
+						"SELECT",
+						"SELECT METADATA",
+						"INSERT",
+						"UPDATE"
+					],
+					"privileges_with_grant_option": [
+						"SELECT",
+						"SELECT METADATA",
+						"INSERT",
+						"UPDATE"
+					]
+				}
+			]
+		}
+	}
+}
