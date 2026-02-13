@@ -1,78 +1,91 @@
-PROCEDURE "GENERIC_DATA_LOADER"(IN ID NVARCHAR(200),
-OUT V_OUT NVARCHAR(5000))
-   LANGUAGE SQLSCRIPT
-   SQL SECURITY INVOKER
-   --DEFAULT SCHEMA <default_schema_name>
-  --READS SQL DATA AS
-  AS
-     lv_cols NVARCHAR(5000);
-     lv_sql  NVARCHAR(10000);
-     lv_insert_sql NVARCHAR(5000);
-     lv_MODULE_NAME NVARCHAR(100);
-     lv_SUB_MODULE_NAME NVARCHAR(100);
-     lV_LOAD_TEMPLATE NVARCHAR(100);
-     lv_target NVARCHAR(100);
-     lv_Truncate NVARCHAR(100);
-     lv_LOAD_TYPE NVARCHAR(100);
-     lv_Count NVARCHAR(5000);
-     lv_Schema NVARCHAR(100);
-BEGIN	 
+srv.on('UpdateStatusComments', async (req) => {
 
-    select LT.STG_TABLE,ST.LOAD_TYPE into lv_target ,lv_LOAD_TYPE
-	from COM_SCB_FILEUPLOAD_MASTER_REPORTFILESTORAGE ST
-		inner join COM_SCB_FILEUPLOAD_MASTER_LOADTABLE LT
-on ST.MODULE_NAME=LT.MODULE_NAME 
-and ST.SUB_MODULE_NAME=LT.SUB_MODULE_NAME
-and ST.LOAD_TEMPLATE=LT.LOAD_TEMPLATE 
-where ST.ID = :ID;
+    const { id, action, comments, module } = req.data;
 
-select CONTAINER_NAME into lv_Schema from COM_SCB_FILEUPLOAD_MASTER_MODULECONTAINERMAP where MODULE_NAME = :lv_MODULE_NAME;
-lv_Truncate  = ' TRUNCATEE TABLE ' || :lv_Schema || '.' || :lv_target;
-IF 
-  lv_LOAD_TYPE = 'TRUNCATE' then
-  EXECUTE IMMEDIATE :lv_Truncate ;
-END IF;
---EXECUTE IMMEDIATE :lv_Truncate;
+    var actionType = ""
+    if (action === "reject") {
+      actionType = "rejected";
+      console.log(actionType)
+    }
+    if (action === "approve") {
+      actionType = "approved";
 
 
---select :lv_target as ABC from DUMMY;
-  select MODULE_NAME,SUB_MODULE_NAME,LOAD_TEMPLATE into lv_MODULE_NAME,lv_SUB_MODULE_NAME,lV_LOAD_TEMPLATE from com_scb_fileupload_master_ReportFileStorage
-  where ID = :ID;
-    -- 1) Generate dynamic JSON_TABLE columns
-    SELECT STRING_AGG(
-             '"' || COLUMN_NAME || '" ' || COLUMN_DATATYPE ||
-             ' PATH ''$.' || COLUMN_NAME || '''',
-             ','
-           )
-      INTO lv_cols
-      FROM com_scb_fileupload_master_LoadMap
-      WHERE MODULE_NAME     = :lv_MODULE_NAME
-       AND SUB_MODULE_NAME = :lv_SUB_MODULE_NAME
-       AND LOAD_TEMPLATE   = :lV_LOAD_TEMPLATE;
+      const containerName = await db.run(
+        SELECT
+          .from('com.scb.fileupload.master.ModuleContainerMap')
+          .columns('CONTAINER_NAME')
+          .where({ MODULE_NAME: module })
+      );
 
-    -- 2) Build lv_sql exactly as before
-    lv_sql :=
-        'SELECT  com_scb_fileupload_master_ReportFileStorage.ID,jt.*,com_scb_fileupload_master_ReportFileStorage.EXPIRY_DATE ' ||
-        'FROM com_scb_fileupload_master_ReportFileStorage, ' ||
-        'JSON_TABLE((SELECT  JSON_DATA FROM com_scb_fileupload_master_ReportFileStorage WHERE com_scb_fileupload_master_ReportFileStorage.ID = ''' || :ID || '''), ''$[*]'' ' ||
-        'COLUMNS (' || :lv_cols || ')) AS jt ' ||
-        'WHERE com_scb_fileupload_master_ReportFileStorage.ID = ''' || :ID || ''' ';
-       -- select :lv_sql from DUMMY;
+      const { CONTAINER_NAME } = containerName[0];
 
-    -- 3) Wrap lv_sql into an INSERT dynamically
-    lv_insert_sql := 'INSERT INTO ' || :lv_Schema || '.' || :lv_target || ' ' || :lv_sql;
-    --select :lv_insert_sql from DUMMY;
-    --lv_insert_sql := 'INSERT INTO ' || :lv_target ||  '(M_ACCOUNT_0,M_SEGMENT_0,AMOUNT,FISCAL_YEAR)' ||' ' || :lv_sql;
-    -- 4) Execute the insert
-    EXECUTE IMMEDIATE :lv_insert_sql;
+      try {
+        // Use db.run() and let HANA return OUT param as a record
+        const sql = `
+      DO BEGIN
+        DECLARE v_result NVARCHAR(500);
+        CALL "GENERIC_DATA_LOADER"(ID => '${id}', V_OUT => v_result);
+        SELECT :v_result AS V_OUT FROM DUMMY;
+      END;
+    `
 
-    --V_OUT := select count(*) from :lv_insert_sql
-   lv_Count := 'select count(*) from (('||:lv_sql ||'))';
-   EXECUTE IMMEDIATE :lv_Count;
-   /*V_OUT := 'Number of Records Inserted is ' || 
-            'select count(*) from (('||:lv_sql ||'))' ;*/
-    V_OUT := 'Number of Records Inserted is ' || :lv_Count;
-    --select V_OUT from DUMMY;
-   --select V_OUT from DUMMY;
+        const result = await db.run(sql)
 
-END
+
+      } catch (error) {
+        req.error(500, `Proc call failed: ${error.message}`);
+      }
+
+
+    }
+    if (!id) return req.error(400, "ID is required");
+    if (!action) return req.error(400, "Action is required");
+
+    try {
+
+
+      const updated = await UPDATE('com.scb.fileupload.master.ReportFileStorage')
+        .set({
+          STATUS: actionType,
+          COMMENTS: comments?.substring(0, 300) || null
+        })
+        .where({ ID: id });
+
+      if (updated === 0) {
+        return `No record found for ID ${id}`;
+      }
+      console.log(req.user);
+      const updateUser = await UPDATE('com.scb.fileupload.master.ReportFileStorage')
+        .set({
+          ACTION_BY: req.user.id
+        })
+        .where({ ID: id });
+
+      //add 3 audit trail logs here
+
+      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
+        .set({ STATUS: actionType })
+        .where({ REPORT_ID: id });
+
+      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
+        .set({ ACTION_BY: req.user.id })
+        .where({ REPORT_ID: id });
+
+      await UPDATE('com.scb.fileupload.master.AuditTrailReport')
+        .set({ ACTION_AT: new Date() })
+        .where({ REPORT_ID: id });
+
+      // Return professional message
+      if (action === "approve") {
+        return `Record approved successfully`;
+      }
+      if (action === "reject") {
+        return `Record rejected successfully`;
+      }
+
+    } catch (err) {
+      req.error(500, `Database update failed: ${err.message}`);
+    }
+
+  });
