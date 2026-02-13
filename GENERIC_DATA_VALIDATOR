@@ -1,4 +1,13 @@
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE, SELECT METADATA
-ON SCHEMA "T1TREASURY_PHY"
-TO "TREASURY_OVERLAY_OO"
-WITH GRANT OPTION;
+--> Using Projection Nodes
+1. The Projection node is one of the most popular node types.Projection nodes usually appear in most calculation views of all types. They provide many useful
+features that most calculation views require.
+2. A Projection node is typically used to achieve the following:
+* To select only the required columns from a data source.
+* To define calculated columns.
+* To define parameters that request values at run-time, such as user-prompts.
+* To apply a filter on the data source.
+
+--> Working with Aggregation Nodes
+1. The purpose of an Aggregation node is to apply aggregate functions to measures based on one or several attributes. The node generates a result set that is
+grouped by the selected attribute columns and computes the selected measure with the specified function, such as SUM, MIN, AVG, and so on.
+2. 
