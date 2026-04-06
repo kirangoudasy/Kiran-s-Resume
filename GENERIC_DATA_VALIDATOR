@@ -160,3 +160,32 @@ if (!columnsData || columnsData.length === 0) {
   sap.m.MessageToast.show("No template data found");
   return;
 }
+
+
+
+let formatted = (columnsData || []).map(col => {
+
+  let dataType = col.DATA_TYPE || "";
+  let baseType = dataType;
+  let length = "";
+  let scale = "";
+
+  if (dataType.includes("(")) {
+    baseType = dataType.split("(")[0];
+
+    let inside = dataType.split("(")[1].replace(")", "");
+    let parts = inside.split(",");
+
+    length = parts[0];
+    scale = parts[1] || "";
+  }
+
+  return {
+    COLUMN_NAME: col.COLUMN_NAME,
+    DATATYPE: baseType,                 // ✅ FIXED
+    LENGTH_PRECISION: length,
+    SCALE: scale,
+    CONSTRAINTS: col.CONSTRAINTS || "NULL"
+  };
+});
+
