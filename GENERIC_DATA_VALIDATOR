@@ -1,9 +1,21 @@
-<Select selectedKey="{columnsModel>DATATYPE}" width="100%" change=".onDataTypeChange">
-    <items>
-        <core:Item key="NVARCHAR" text="NVARCHAR"/>
-        <core:Item key="TIMESTAMP" text="TIMESTAMP"/>
-        <core:Item key="DECIMAL" text="DECIMAL"/>
-        <core:Item key="DATE" text="DATE"/>
-        <core:Item key="TIME" text="TIME"/>
-    </items>
-</Select>
+onDeleteRow: function (oEvent) {
+
+  const oItem = oEvent.getSource().getParent(); // ColumnListItem
+  const oContext = oItem.getBindingContext("columnsModel");
+
+  const oModel = this.getView().getModel("columnsModel");
+  const aData = oModel.getProperty("/columns");
+
+  const iIndex = oContext.getPath().split("/")[2];
+
+  // Optional confirmation (remove if you don’t want popup)
+  sap.m.MessageBox.confirm("Delete this column?", {
+    onClose: (action) => {
+      if (action === "OK") {
+        aData.splice(iIndex, 1);
+        oModel.setProperty("/columns", aData);
+      }
+    }
+  });
+
+}
