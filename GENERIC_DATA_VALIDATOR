@@ -1,89 +1,106 @@
-onEditExpirySave: async function () {
+<beginButton>
+    <Button 
+        text="Save Expiry" 
+        visible="{= ${editTabBar>/selectedKey} === 'expiry' }"
+        press=".onSaveExpirySeparate" />
+</beginButton>
 
-        const oTabBar = this.byId("editTabBar"); // give ID in fragment
-        const sSelectedKey = oTabBar.getSelectedKey();
+<customFooter>
+    <Toolbar>
+        <ToolbarSpacer/>
+        <Button 
+            text="Save Template" 
+            type="Emphasized"
+            visible="{= ${editTabBar>/selectedKey} === 'template' }"
+            press=".onSaveTemplateSeparate"/>
+        <Button text="Cancel" press=".onEditExpiryCancel"/>
+    </Toolbar>
+</customFooter>
 
-        // =========================
-        // 👉 CASE 1: EXPIRY TAB
-        // =========================
-        if (sSelectedKey === "expiry") {
 
-          const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
 
-          if (!sNewDate) {
-            sap.m.MessageToast.show("Please select a date");
-            return;
-          }
+onSaveExpirySeparate: async function () {
 
-          const oTable = this.byId("templateDashTable");
-          const aIndices = oTable.getSelectedIndices();
+  const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
 
-          if (aIndices.length !== 1) {
-            sap.m.MessageToast.show("Please select exactly 1 row.");
-            return;
-          }
+  if (!sNewDate) {
+    sap.m.MessageToast.show("Please select a date");
+    return;
+  }
 
-          const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const oTable = this.byId("templateDashTable");
+  const aIndices = oTable.getSelectedIndices();
 
-          const oModel = this.getOwnerComponent().getModel();
-          const fn = oModel.bindContext("/EditTemplateExpiry(...)");
+  if (aIndices.length !== 1) {
+    sap.m.MessageToast.show("Please select exactly 1 row.");
+    return;
+  }
 
-          fn.setParameter("id", row.ID);
-          fn.setParameter("newExpiryDate", sNewDate);
+  const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const sId = row.ID || row.Id || row.id;
 
-          await fn.execute();
+  const oModel = this.getOwnerComponent().getModel();
+  const fn = oModel.bindContext("/EditTemplateExpiry(...)");
 
-          this.byId("templateDashTable").getBinding("rows").refresh();
+  fn.setParameter("id", sId);
+  fn.setParameter("newExpiryDate", sNewDate);
 
-          this._oEditExpiryDialog.close();
-          return;
-        }
+  await fn.execute();
 
-        // =========================
-        // 👉 CASE 2: TEMPLATE TAB
-        // =========================
-        if (sSelectedKey === "template") {
+  this.byId("templateDashTable").getBinding("rows").refresh();
+  this._oEditExpiryDialog.close();
+}
 
-          const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
 
-          if (!aColumns || aColumns.length === 0) {
-            sap.m.MessageToast.show("No template data found");
-            return;
-          }
 
-          const formatted = aColumns.map(col => {
 
-            let dataType = col.DATATYPE;
+onSaveTemplateSeparate: async function () {
 
-            if (dataType === "NVARCHAR") {
-              dataType += `(${col.LENGTH_PRECISION || 1})`;
-            } 
-            else if (dataType === "DECIMAL") {
-              dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
-            }
+  const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
 
-            return {
-              COLUMN_NAME: col.COLUMN_NAME,
-              DATA_TYPE: dataType,
-              CONSTRAINTS: col.CONSTRAINTS
-            };
-          });
+  if (!aColumns || aColumns.length === 0) {
+    sap.m.MessageToast.show("No template data found");
+    return;
+  }
 
-          const oTable = this.byId("templateDashTable");
-          const aIndices = oTable.getSelectedIndices();
-          const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const formatted = aColumns.map(col => {
 
-          const oModel = this.getOwnerComponent().getModel();
-          const fn = oModel.bindContext("/UpdateTemplate(...)");
+    let dataType = col.DATATYPE;
 
-          fn.setParameter("id", row.ID);
-          fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
-          fn.setParameter("status", "pending"); // 👈 IMPORTANT
+    if (dataType === "NVARCHAR") {
+      dataType += `(${col.LENGTH_PRECISION || 1})`;
+    } 
+    else if (dataType === "DECIMAL") {
+      dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
+    }
 
-          await fn.execute();
+    return {
+      COLUMN_NAME: col.COLUMN_NAME,
+      DATA_TYPE: dataType,
+      CONSTRAINTS: col.CONSTRAINTS
+    };
+  });
 
-          this.byId("templateDashTable").getBinding("rows").refresh();
+  const oTable = this.byId("templateDashTable");
+  const aIndices = oTable.getSelectedIndices();
 
-          this._oEditExpiryDialog.close();
-        }
-      }
+  if (aIndices.length !== 1) {
+    sap.m.MessageToast.show("Please select exactly 1 row.");
+    return;
+  }
+
+  const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const sId = row.ID || row.Id || row.id;
+
+  const oModel = this.getOwnerComponent().getModel();
+  const fn = oModel.bindContext("/UpdateTemplate(...)");
+
+  fn.setParameter("id", sId);
+  fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
+  fn.setParameter("status", "pending");
+
+  await fn.execute();
+
+  this.byId("templateDashTable").getBinding("rows").refresh();
+  this._oEditExpiryDialog.close();
+}
