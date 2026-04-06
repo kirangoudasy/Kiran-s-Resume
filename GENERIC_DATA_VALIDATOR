@@ -9,7 +9,7 @@
                 <items>
 
                     <!-- TAB 1: Edit Expiry Date -->
-                    <IconTabFilter text="Edit Expiry Date" key="expiry">
+                    <IconTabFilter text="Edit Expiry Date">
 
                         <VBox class="sapUiSmallMargin">
                             <Label text="New Expiry Date"/>
@@ -18,12 +18,17 @@
                                 displayFormat="long" 
                                 required="true"
                                 value="{editModel>/expiryDate}" />
+                            
+                            <!-- ✅ SAVE HERE -->
+                            <Button 
+                                text="Save Expiry" 
+                                press=".onSaveExpirySeparate"/>
                         </VBox>
 
                     </IconTabFilter>
 
                     <!-- TAB 2: Edit Template -->
-                    <IconTabFilter text="Edit Template" key="template">
+                    <IconTabFilter text="Edit Template">
 
                         <VBox class="sapUiSmallMargin">
 
@@ -42,10 +47,8 @@
                                     <ColumnListItem>
                                         <cells>
 
-                                            <!-- Column Name -->
                                             <Input value="{columnsModel>COLUMN_NAME}" liveChange=".onColumnNameChange"/>
 
-                                            <!-- Data Type -->
                                             <Select selectedKey="{columnsModel>DATATYPE}" change=".onDataTypeChange">
                                                 <items>
                                                     <core:Item key="NVARCHAR" text="NVARCHAR"/>
@@ -56,21 +59,18 @@
                                                 </items>
                                             </Select>
 
-                                            <!-- Length -->
                                             <StepInput 
                                                 value="{columnsModel>LENGTH_PRECISION}" 
                                                 min="1"
                                                 max="1000"
                                                 enabled="{= ${columnsModel>DATATYPE} === 'NVARCHAR' || ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
 
-                                            <!-- Scale -->
                                             <StepInput 
                                                 value="{columnsModel>SCALE}" 
                                                 min="0"
                                                 max="38"
                                                 enabled="{= ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
 
-                                            <!-- Constraints -->
                                             <Select selectedKey="{columnsModel>CONSTRAINTS}">
                                                 <items>
                                                     <core:Item key="NULL" text="NULL"/>
@@ -78,7 +78,6 @@
                                                 </items>
                                             </Select>
 
-                                            <!-- Delete -->
                                             <Button 
                                                 icon="sap-icon://delete"
                                                 type="Transparent"
@@ -92,7 +91,10 @@
 
                             <HBox class="sapUiSmallMarginTop">
                                 <Button text="Add Column" press=".onAddColumn"/>
-                                
+                                <Button 
+                                    text="Save Template" 
+                                    type="Emphasized"
+                                    press=".onSaveTemplateSeparate"/>
                             </HBox>
 
                         </VBox>
@@ -105,26 +107,7 @@
 
         </content>
 
-        <!-- EXISTING BUTTONS -->
-        <beginButton>
-        <Button 
-        text="Save Expiry" 
-        visible="{= ${editTabBar>/selectedKey} === 'expiry' }"
-        press=".onSaveExpirySeparate" />
-        </beginButton>
-
-        <customFooter>
-            <Toolbar>
-                <ToolbarSpacer/>
-                <Button 
-                    text="Save Template" 
-                    type="Emphasized"
-                    visible="{= ${editTabBar>/selectedKey} === 'template' }"
-                    press=".onSaveTemplateSeparate"/>
-                <Button text="Cancel" press=".onEditExpiryCancel"/>
-            </Toolbar>
-        </customFooter>
-
+        <!-- ✅ ONLY CANCEL HERE -->
         <endButton>
             <Button text="Cancel" press=".onEditExpiryCancel" />
         </endButton>
