@@ -189,3 +189,18 @@ let formatted = (columnsData || []).map(col => {
   };
 });
 
+
+
+
+<cells>
+    <Input value="{columnsModel>COLUMN_NAME}"/>
+
+    <Input value="{columnsModel>DATATYPE}"/>
+
+    <Input value="{columnsModel>CONSTRAINTS}"/>
+
+    <Button 
+        icon="sap-icon://delete"
+        type="Transparent"
+        press=".onDeleteRow"/>
+</cells>
