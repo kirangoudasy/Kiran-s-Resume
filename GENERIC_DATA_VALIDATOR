@@ -1,206 +1,83 @@
-onEditPress: async function () {
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
 
-  const oTable = this.byId("templateDashTable");
-  const aSelectedIndices = oTable.getSelectedIndices();
+    <Dialog id="editExpiryDialog" title="Edit Template" draggable="true" resizable="true" contentWidth="800px">
 
-  if (aSelectedIndices.length !== 1) {
-    sap.m.MessageToast.show("Please select only one row");
-    return;
-  }
+        <content>
 
-  const oRowData = oTable.getContextByIndex(aSelectedIndices[0]).getObject();
+            <IconTabBar>
 
-  // ❌ BLOCK REJECTED
-  if (oRowData.STATUS === "rejected") {
-    sap.m.MessageToast.show("Cannot edit rejected template");
-    return;
-  }
+                <items>
 
-  // ✅ Set expiry model
-  const oEditModel = new sap.ui.model.json.JSONModel({
-    expiryDate: oRowData.EXPIRY_DATE,
-    templateId: oRowData.ID
-  });
-  this.getView().setModel(oEditModel, "editModel");
+                    <!-- TAB 1: Edit Expiry Date (EXISTING) -->
+                    <IconTabFilter text="Edit Expiry Date">
 
-  // ✅ Parse template JSON
-  let columnsData = oRowData.JSON_TEMPLATE;
+                        <VBox class="sapUiSmallMargin">
+                            <Label text="New Expiry Date"/>
+                            <DatePicker 
+                                valueFormat="yyyy-MM-dd" 
+                                displayFormat="long" 
+                                required="true"
+                                value="{editModel>/expiryDate}" />
+                        </VBox>
 
-  if (typeof columnsData === "string") {
-    columnsData = JSON.parse(columnsData);
-  }
+                    </IconTabFilter>
 
-  // ✅ Convert to UI format (columnsModel)
-  let formatted = columnsData.map(col => {
+                    <!-- TAB 2: Edit Template (NEW) -->
+                    <IconTabFilter text="Edit Template">
 
-    let length = "";
-    let scale = "";
+                        <VBox class="sapUiSmallMargin">
 
-    if (col.DATA_TYPE.includes("(")) {
-      let inside = col.DATA_TYPE.split("(")[1].replace(")", "");
-      let parts = inside.split(",");
-      length = parts[0];
-      scale = parts[1] || "";
-    }
+                            <Table items="{columnsModel>/columns}">
 
-    return {
-      COLUMN_NAME: col.COLUMN_NAME,
-      DATATYPE: col.DATA_TYPE.split("(")[0],
-      LENGTH_PRECISION: length,
-      SCALE: scale,
-      CONSTRAINTS: col.CONSTRAINTS || "NULL"
-    };
-  });
+                                <cells>
+                                    <Input value="{columnsModel>COLUMN_NAME}"/>
 
-  this.getView().setModel(new sap.ui.model.json.JSONModel({
-    columns: formatted
-  }), "columnsModel");
+                                    <Input value="{columnsModel>DATATYPE}"/>
 
-  // open dialog
-  if (!this._oEditExpiryDialog) {
-    this._oEditExpiryDialog = await sap.ui.core.Fragment.load({
-      id: this.getView().getId(),
-      name: "fileuploader.view.fragment.EditExpiry",
-      controller: this
-    });
-    this.getView().addDependent(this._oEditExpiryDialog);
-  }
+                                    <Input value="{columnsModel>CONSTRAINTS}"/>
 
-  this._oEditExpiryDialog.open();
-}
+                                    <Button 
+                                        icon="sap-icon://delete"
+                                        type="Transparent"
+                                        press=".onDeleteRow"/>
+                                </cells>
 
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <Input value="{columnsModel>COLUMN_NAME}"/>
+                                            <Input value="{columnsModel>DATA_TYPE}"/>
+                                            <Input value="{columnsModel>CONSTRAINTS}"/>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
 
-onSubmitEdit: async function () {
+                            </Table>
 
-  const columns = this.getView().getModel("columnsModel").getData().columns;
-  const editData = this.getView().getModel("editModel").getData();
+                            <HBox class="sapUiSmallMarginTop">
+                                <Button text="Add Column" press=".onAddColumn"/>
+                                <Button text="Submit" type="Emphasized" press=".onSubmitEdit"/>
+                            </HBox>
 
-  // convert UI → backend format
-  let payloadColumns = columns.map(col => {
+                        </VBox>
 
-    let dataType = col.DATATYPE;
+                    </IconTabFilter>
 
-    if (col.DATATYPE === "NVARCHAR") {
-      dataType += `(${col.LENGTH_PRECISION || 1})`;
-    } 
-    else if (col.DATATYPE === "DECIMAL") {
-      dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
-    }
+                </items>
 
-    return {
-      COLUMN_NAME: col.COLUMN_NAME,
-      DATA_TYPE: dataType,
-      CONSTRAINTS: col.CONSTRAINTS
-    };
-  });
+            </IconTabBar>
 
-  const payload = {
-    ID: editData.templateId,
-    JSON_TEMPLATE: JSON.stringify(payloadColumns),
-    EXPIRY_DATE: editData.expiryDate,
-    STATUS: "pending"   // 🔥 IMPORTANT
-  };
+        </content>
 
-  try {
+        <!-- EXISTING BUTTONS (UNCHANGED) -->
+        <beginButton>
+            <Button text="save" press=".onEditExpirySave" />
+        </beginButton>
 
-    const oModel = this.getOwnerComponent().getModel();
-    const oFunction = oModel.bindContext("/UpdateTemplate(...)");
+        <endButton>
+            <Button text="Cancel" press=".onEditExpiryCancel" />
+        </endButton>
 
-    oFunction.setParameter("payload", JSON.stringify(payload));
+    </Dialog>
 
-    await oFunction.execute();
-
-    sap.m.MessageToast.show("Template updated");
-
-    this._oEditExpiryDialog.close();
-
-    this.byId("templateDashTable").getBinding("rows").refresh();
-
-  } catch (e) {
-    console.error(e);
-    sap.m.MessageToast.show("Error updating template");
-  }
-}
-
-
-
-
-let columnsData = oRowData.JSON_TEMPLATE || oRowData.TEMPLATE_JSON || oRowData.COLUMNS;
-
-if (!columnsData) {
-  sap.m.MessageToast.show("No template data found");
-  return;
-}
-
-if (typeof columnsData === "string") {
-  columnsData = JSON.parse(columnsData);
-}
-
-
-
-let formatted = (columnsData || []).map(col => {
-
-
-
-// 🔥 Fetch template data from backend
-const oModel = this.getOwnerComponent().getModel();
-
-const oFunction = oModel.bindContext("/fetchTemplatePreview(...)");
-oFunction.setParameter("ID", oRowData.ID);
-
-await oFunction.execute();
-
-const oCtx = oFunction.getBoundContext();
-const data = oCtx.getObject();
-
-// get full template (not just preview)
-let columnsData = data.value;
-
-if (!columnsData || columnsData.length === 0) {
-  sap.m.MessageToast.show("No template data found");
-  return;
-}
-
-
-
-let formatted = (columnsData || []).map(col => {
-
-  let dataType = col.DATA_TYPE || "";
-  let baseType = dataType;
-  let length = "";
-  let scale = "";
-
-  if (dataType.includes("(")) {
-    baseType = dataType.split("(")[0];
-
-    let inside = dataType.split("(")[1].replace(")", "");
-    let parts = inside.split(",");
-
-    length = parts[0];
-    scale = parts[1] || "";
-  }
-
-  return {
-    COLUMN_NAME: col.COLUMN_NAME,
-    DATATYPE: baseType,                 // ✅ FIXED
-    LENGTH_PRECISION: length,
-    SCALE: scale,
-    CONSTRAINTS: col.CONSTRAINTS || "NULL"
-  };
-});
-
-
-
-
-<cells>
-    <Input value="{columnsModel>COLUMN_NAME}"/>
-
-    <Input value="{columnsModel>DATATYPE}"/>
-
-    <Input value="{columnsModel>CONSTRAINTS}"/>
-
-    <Button 
-        icon="sap-icon://delete"
-        type="Transparent"
-        press=".onDeleteRow"/>
-</cells>
+</core:FragmentDefinition>
