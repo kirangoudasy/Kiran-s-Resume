@@ -1,82 +1,90 @@
 onSaveExpirySeparate: async function () {
 
-      const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
+  const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
 
-      if (!sNewDate) {
-        sap.m.MessageToast.show("Please select a date");
-        return;
-      }
+  if (!sNewDate) {
+    sap.m.MessageToast.show("Please select a date");
+    return;
+  }
 
-      const oTable = this.byId("templateDashTable");
-      const aIndices = oTable.getSelectedIndices();
+  const oTable = this.byId("templateDashTable");
+  const aIndices = oTable.getSelectedIndices();
 
-      if (aIndices.length !== 1) {
-        sap.m.MessageToast.show("Please select exactly 1 row.");
-        return;
-      }
+  if (aIndices.length !== 1) {
+    sap.m.MessageToast.show("Please select exactly 1 row.");
+    return;
+  }
 
-      const row = oTable.getContextByIndex(aIndices[0]).getObject();
-      const sId = row.ID || row.Id || row.id;
+  const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const sId = row.ID || row.Id || row.id;
 
-      const oModel = this.getOwnerComponent().getModel();
-      const fn = oModel.bindContext("/EditTemplateExpiry(...)");
+  const oModel = this.getOwnerComponent().getModel();
+  const fn = oModel.bindContext("/EditTemplateExpiry(...)");
 
-      fn.setParameter("id", sId);
-      fn.setParameter("newExpiryDate", sNewDate);
+  fn.setParameter("id", sId);
+  fn.setParameter("newExpiryDate", sNewDate);
 
-      await fn.execute();
+  await fn.execute();
 
-      this.byId("templateDashTable").getBinding("rows").refresh();
-      this._oEditExpiryDialog.close();
-    },
+  this.byId("templateDashTable").getBinding("rows").refresh();
 
-    onSaveTemplateSeparate: async function () {
-
-    const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
-
-    if (!aColumns || aColumns.length === 0) {
-      sap.m.MessageToast.show("No template data found");
-      return;
-    }
-
-    const formatted = aColumns.map(col => {
-
-      let dataType = col.DATATYPE;
-
-      if (dataType === "NVARCHAR") {
-        dataType += `(${col.LENGTH_PRECISION || 1})`;
-      } 
-      else if (dataType === "DECIMAL") {
-        dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
-      }
-
-      return {
-        COLUMN_NAME: col.COLUMN_NAME,
-        DATA_TYPE: dataType,
-        CONSTRAINTS: col.CONSTRAINTS
-      };
-    });
-
-    const oTable = this.byId("templateDashTable");
-    const aIndices = oTable.getSelectedIndices();
-
-    if (aIndices.length !== 1) {
-      sap.m.MessageToast.show("Please select exactly 1 row.");
-      return;
-    }
-
-    const row = oTable.getContextByIndex(aIndices[0]).getObject();
-    const sId = row.ID || row.Id || row.id;
-
-    const oModel = this.getOwnerComponent().getModel();
-    const fn = oModel.bindContext("/UpdateTemplate(...)");
-
-    fn.setParameter("id", sId);
-    fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
-    fn.setParameter("status", "pending");
-
-    await fn.execute();
-
-    this.byId("templateDashTable").getBinding("rows").refresh();
+  // ✅ SAFE CLOSE
+  if (this._oEditExpiryDialog) {
     this._oEditExpiryDialog.close();
-  },
+  }
+},
+
+onSaveTemplateSeparate: async function () {
+
+  const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
+
+  if (!aColumns || aColumns.length === 0) {
+    sap.m.MessageToast.show("No template data found");
+    return;
+  }
+
+  const formatted = aColumns.map(col => {
+
+    let dataType = col.DATATYPE;
+
+    if (dataType === "NVARCHAR") {
+      dataType += `(${col.LENGTH_PRECISION || 1})`;
+    } 
+    else if (dataType === "DECIMAL") {
+      dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
+    }
+
+    return {
+      COLUMN_NAME: col.COLUMN_NAME,
+      DATA_TYPE: dataType,
+      CONSTRAINTS: col.CONSTRAINTS
+    };
+  });
+
+  const oTable = this.byId("templateDashTable");
+  const aIndices = oTable.getSelectedIndices();
+
+  if (aIndices.length !== 1) {
+    sap.m.MessageToast.show("Please select exactly 1 row.");
+    return;
+  }
+
+  const row = oTable.getContextByIndex(aIndices[0]).getObject();
+  const sId = row.ID || row.Id || row.id;
+
+  const oModel = this.getOwnerComponent().getModel();
+  const fn = oModel.bindContext("/UpdateTemplate(...)");
+
+  fn.setParameter("id", sId);
+  fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
+  fn.setParameter("status", "pending");
+
+  await fn.execute();
+
+  this.byId("templateDashTable").getBinding("rows").refresh();
+
+  // ✅ SAFE CLOSE
+  if (this._oEditExpiryDialog) {
+    this._oEditExpiryDialog.close();
+  }
+},
