@@ -121,3 +121,21 @@ onSubmitEdit: async function () {
     sap.m.MessageToast.show("Error updating template");
   }
 }
+
+
+
+
+let columnsData = oRowData.JSON_TEMPLATE || oRowData.TEMPLATE_JSON || oRowData.COLUMNS;
+
+if (!columnsData) {
+  sap.m.MessageToast.show("No template data found");
+  return;
+}
+
+if (typeof columnsData === "string") {
+  columnsData = JSON.parse(columnsData);
+}
+
+
+
+let formatted = (columnsData || []).map(col => {
