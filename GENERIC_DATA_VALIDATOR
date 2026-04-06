@@ -1,90 +1,134 @@
-onSaveExpirySeparate: async function () {
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
 
-  const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
+    <Dialog title="Edit Template" draggable="true" resizable="true" contentWidth="800px">
 
-  if (!sNewDate) {
-    sap.m.MessageToast.show("Please select a date");
-    return;
-  }
+        <content>
 
-  const oTable = this.byId("templateDashTable");
-  const aIndices = oTable.getSelectedIndices();
+            <IconTabBar>
 
-  if (aIndices.length !== 1) {
-    sap.m.MessageToast.show("Please select exactly 1 row.");
-    return;
-  }
+                <items>
 
-  const row = oTable.getContextByIndex(aIndices[0]).getObject();
-  const sId = row.ID || row.Id || row.id;
+                    <!-- TAB 1: Edit Expiry Date -->
+                    <IconTabFilter text="Edit Expiry Date" key="expiry">
 
-  const oModel = this.getOwnerComponent().getModel();
-  const fn = oModel.bindContext("/EditTemplateExpiry(...)");
+                        <VBox class="sapUiSmallMargin">
+                            <Label text="New Expiry Date"/>
+                            <DatePicker 
+                                valueFormat="yyyy-MM-dd" 
+                                displayFormat="long" 
+                                required="true"
+                                value="{editModel>/expiryDate}" />
+                        </VBox>
 
-  fn.setParameter("id", sId);
-  fn.setParameter("newExpiryDate", sNewDate);
+                    </IconTabFilter>
 
-  await fn.execute();
+                    <!-- TAB 2: Edit Template -->
+                    <IconTabFilter text="Edit Template" key="template">
 
-  this.byId("templateDashTable").getBinding("rows").refresh();
+                        <VBox class="sapUiSmallMargin">
 
-  // ✅ SAFE CLOSE
-  if (this._oEditExpiryDialog) {
-    this._oEditExpiryDialog.close();
-  }
-},
+                            <Table items="{columnsModel>/columns}" class="sapUiSizeCompact">
 
-onSaveTemplateSeparate: async function () {
+                                <columns>
+                                    <Column><Text text="Column Name"/></Column>
+                                    <Column><Text text="Data Type"/></Column>
+                                    <Column><Text text="Length / Precision"/></Column>
+                                    <Column><Text text="Scale"/></Column>
+                                    <Column><Text text="Constraints"/></Column>
+                                    <Column width="3rem"/>
+                                </columns>
 
-  const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
 
-  if (!aColumns || aColumns.length === 0) {
-    sap.m.MessageToast.show("No template data found");
-    return;
-  }
+                                            <!-- Column Name -->
+                                            <Input value="{columnsModel>COLUMN_NAME}" liveChange=".onColumnNameChange"/>
 
-  const formatted = aColumns.map(col => {
+                                            <!-- Data Type -->
+                                            <Select selectedKey="{columnsModel>DATATYPE}" change=".onDataTypeChange">
+                                                <items>
+                                                    <core:Item key="NVARCHAR" text="NVARCHAR"/>
+                                                    <core:Item key="TIMESTAMP" text="TIMESTAMP"/>
+                                                    <core:Item key="DECIMAL" text="DECIMAL"/>
+                                                    <core:Item key="DATE" text="DATE"/>
+                                                    <core:Item key="TIME" text="TIME"/>
+                                                </items>
+                                            </Select>
 
-    let dataType = col.DATATYPE;
+                                            <!-- Length -->
+                                            <StepInput 
+                                                value="{columnsModel>LENGTH_PRECISION}" 
+                                                min="1"
+                                                max="1000"
+                                                enabled="{= ${columnsModel>DATATYPE} === 'NVARCHAR' || ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
 
-    if (dataType === "NVARCHAR") {
-      dataType += `(${col.LENGTH_PRECISION || 1})`;
-    } 
-    else if (dataType === "DECIMAL") {
-      dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
-    }
+                                            <!-- Scale -->
+                                            <StepInput 
+                                                value="{columnsModel>SCALE}" 
+                                                min="0"
+                                                max="38"
+                                                enabled="{= ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
 
-    return {
-      COLUMN_NAME: col.COLUMN_NAME,
-      DATA_TYPE: dataType,
-      CONSTRAINTS: col.CONSTRAINTS
-    };
-  });
+                                            <!-- Constraints -->
+                                            <Select selectedKey="{columnsModel>CONSTRAINTS}">
+                                                <items>
+                                                    <core:Item key="NULL" text="NULL"/>
+                                                    <core:Item key="NOT NULL" text="NOT NULL"/>
+                                                </items>
+                                            </Select>
 
-  const oTable = this.byId("templateDashTable");
-  const aIndices = oTable.getSelectedIndices();
+                                            <!-- Delete -->
+                                            <Button 
+                                                icon="sap-icon://delete"
+                                                type="Transparent"
+                                                press=".onDeleteRow"/>
 
-  if (aIndices.length !== 1) {
-    sap.m.MessageToast.show("Please select exactly 1 row.");
-    return;
-  }
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
 
-  const row = oTable.getContextByIndex(aIndices[0]).getObject();
-  const sId = row.ID || row.Id || row.id;
+                            </Table>
 
-  const oModel = this.getOwnerComponent().getModel();
-  const fn = oModel.bindContext("/UpdateTemplate(...)");
+                            <HBox class="sapUiSmallMarginTop">
+                                <Button text="Add Column" press=".onAddColumn"/>
+                                
+                            </HBox>
 
-  fn.setParameter("id", sId);
-  fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
-  fn.setParameter("status", "pending");
+                        </VBox>
 
-  await fn.execute();
+                    </IconTabFilter>
 
-  this.byId("templateDashTable").getBinding("rows").refresh();
+                </items>
 
-  // ✅ SAFE CLOSE
-  if (this._oEditExpiryDialog) {
-    this._oEditExpiryDialog.close();
-  }
-},
+            </IconTabBar>
+
+        </content>
+
+        <!-- EXISTING BUTTONS -->
+        <beginButton>
+        <Button 
+        text="Save Expiry" 
+        visible="{= ${editTabBar>/selectedKey} === 'expiry' }"
+        press=".onSaveExpirySeparate" />
+        </beginButton>
+
+        <customFooter>
+            <Toolbar>
+                <ToolbarSpacer/>
+                <Button 
+                    text="Save Template" 
+                    type="Emphasized"
+                    visible="{= ${editTabBar>/selectedKey} === 'template' }"
+                    press=".onSaveTemplateSeparate"/>
+                <Button text="Cancel" press=".onEditExpiryCancel"/>
+            </Toolbar>
+        </customFooter>
+
+        <endButton>
+            <Button text="Cancel" press=".onEditExpiryCancel" />
+        </endButton>
+
+    </Dialog>
+
+</core:FragmentDefinition>
