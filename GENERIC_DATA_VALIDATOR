@@ -10,77 +10,87 @@ onEditPress: async function () {
 
   const oRowData = oTable.getContextByIndex(aSelectedIndices[0]).getObject();
 
-  //BLOCK REJECTED
+  // ❌ BLOCK REJECTED
   if (oRowData.STATUS === "rejected") {
     sap.m.MessageToast.show("Cannot edit rejected template");
     return;
   }
 
-  //Set expiry model
+  // ✅ Set expiry model
   const oEditModel = new sap.ui.model.json.JSONModel({
     expiryDate: oRowData.EXPIRY_DATE,
     templateId: oRowData.ID
   });
   this.getView().setModel(oEditModel, "editModel");
 
-  // Parse template JSON
-const oModel = this.getOwnerComponent().getModel();
+  // =============================
+  // 🔹 FETCH TEMPLATE DATA
+  // =============================
+  const oModel = this.getOwnerComponent().getModel();
 
-const oFunction = oModel.bindContext("/fetchTemplatePreview(...)");
-oFunction.setParameter("ID", oRowData.ID);
+  const oFunction = oModel.bindContext("/fetchTemplatePreview(...)");
+  oFunction.setParameter("ID", oRowData.ID);
 
-await oFunction.execute();
+  await oFunction.execute();
 
-const oCtx = oFunction.getBoundContext();
-const data = oCtx.getObject();
+  const oCtx = oFunction.getBoundContext();
+  const data = oCtx.getObject();
 
-// get full template (not just preview)
-let columnsData = data.value;
+  let columnsData = data.value;
 
-if (!columnsData || columnsData.length === 0) {
-  sap.m.MessageToast.show("No template data found");
-  return;
-}
-  //Convert to UI format (columnsModel)
-  let formatted = (columnsData || []).map(col => {
-
-  let dataType = col.DATA_TYPE || "";
-  let baseType = dataType;
-  let length = "";
-  let scale = "";
-
-  if (dataType.includes("(")) {
-    baseType = dataType.split("(")[0];
-
-    let inside = dataType.split("(")[1].replace(")", "");
-    let parts = inside.split(",");
-
-    length = parts[0];
-    scale = parts[1] || "";
+  if (!columnsData || columnsData.length === 0) {
+    sap.m.MessageToast.show("No template data found");
+    return;
   }
 
-  return {
-    COLUMN_NAME: col.COLUMN_NAME,
-    DATATYPE: baseType,                 // ✅ FIXED
-    LENGTH_PRECISION: length,
-    SCALE: scale,
-    CONSTRAINTS: col.CONSTRAINTS || "NULL"
-  };
-});
+  // =============================
+  // 🔹 FORMAT DATA
+  // =============================
+  let formatted = columnsData.map(col => {
+
+    let dataType = col.DATA_TYPE || "";
+    let baseType = dataType;
+    let length = "";
+    let scale = "";
+
+    if (dataType.includes("(")) {
+      baseType = dataType.split("(")[0];
+
+      let inside = dataType.split("(")[1].replace(")", "");
+      let parts = inside.split(",");
+
+      length = parts[0];
+      scale = parts[1] || "";
+    }
+
+    return {
+      COLUMN_NAME: col.COLUMN_NAME,
+      DATATYPE: baseType,
+      LENGTH_PRECISION: length,
+      SCALE: scale,
+      CONSTRAINTS: col.CONSTRAINTS || "NULL"
+    };
+  });
 
   this.getView().setModel(new sap.ui.model.json.JSONModel({
     columns: formatted
   }), "columnsModel");
 
-  // open dialog
+  // =============================
+  // 🔹 LOAD DIALOG ONLY ONCE
+  // =============================
   if (!this._oEditExpiryDialog) {
     this._oEditExpiryDialog = await sap.ui.core.Fragment.load({
-      id: this.getView().getId(),
+      id: this.getView().getId(), // VERY IMPORTANT
       name: "fileuploader.view.fragment.EditExpiry",
       controller: this
     });
     this.getView().addDependent(this._oEditExpiryDialog);
   }
-  this._oEditExpiryDialog.close();
+
+  // ❌ REMOVE THIS (CAUSE OF BUG)
+  // this._oEditExpiryDialog.close();
+
+  // ✅ ONLY OPEN
   this._oEditExpiryDialog.open();
-},
+}
