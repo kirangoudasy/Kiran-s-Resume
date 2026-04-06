@@ -1,97 +1,34 @@
-onEditExpirySave: async function () {
+srv.on("UpdateTemplate", async (req) => {
 
-  const oTabBar = this.byId("editTabBar"); // give ID in fragment
-  const sSelectedKey = oTabBar.getSelectedKey();
+  const { TemplateStorage, LoadMap } = srv.entities;
+  const { id, JSON_TEMPLATE, status } = req.data;
 
-  // =========================
-  // 👉 CASE 1: EXPIRY TAB
-  // =========================
-  if (sSelectedKey === "expiry") {
+  const tx = cds.transaction(req);
 
-    const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
+  // get existing row
+  const result = await tx.read(TemplateStorage).where({ ID: id });
 
-    if (!sNewDate) {
-      sap.m.MessageToast.show("Please select a date");
-      return;
-    }
-
-    const oTable = this.byId("templateDashTable");
-    const aIndices = oTable.getSelectedIndices();
-
-    if (aIndices.length !== 1) {
-      sap.m.MessageToast.show("Please select exactly 1 row.");
-      return;
-    }
-
-    const row = oTable.getContextByIndex(aIndices[0]).getObject();
-
-    const oModel = this.getOwnerComponent().getModel();
-    const fn = oModel.bindContext("/EditTemplateExpiry(...)");
-
-    fn.setParameter("id", row.ID);
-    fn.setParameter("newExpiryDate", sNewDate);
-
-    await fn.execute();
-
-    this.byId("templateDashTable").getBinding("rows").refresh();
-
-    this._oEditExpiryDialog.close();
-    return;
+  if (!result || !result.length) {
+    return req.error(404, "Template not found");
   }
 
-  // =========================
-  // 👉 CASE 2: TEMPLATE TAB
-  // =========================
-  if (sSelectedKey === "template") {
+  const row = result[0];
 
-    const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
+  // ✅ update template JSON + status
+  await tx.update(TemplateStorage)
+    .set({
+      JSON_TEMPLATE: JSON_TEMPLATE,
+      STATUS: status
+    })
+    .where({ ID: id });
 
-    if (!aColumns || aColumns.length === 0) {
-      sap.m.MessageToast.show("No template data found");
-      return;
-    }
+  // (optional but recommended — same pattern you used above)
+  // delete old LoadMap entries
+  await tx.delete(LoadMap).where({
+    MODULE_NAME: row.MODULE_NAME,
+    SUB_MODULE_NAME: row.SUB_MODULE_NAME,
+    LOAD_TEMPLATE: row.LOAD_TEMPLATE
+  });
 
-    const formatted = aColumns.map(col => {
-
-      let dataType = col.DATATYPE;
-
-      if (dataType === "NVARCHAR") {
-        dataType += `(${col.LENGTH_PRECISION || 1})`;
-      } 
-      else if (dataType === "DECIMAL") {
-        dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
-      }
-
-      return {
-        COLUMN_NAME: col.COLUMN_NAME,
-        DATA_TYPE: dataType,
-        CONSTRAINTS: col.CONSTRAINTS
-      };
-    });
-
-    const oTable = this.byId("templateDashTable");
-    const aIndices = oTable.getSelectedIndices();
-    const row = oTable.getContextByIndex(aIndices[0]).getObject();
-
-    const oModel = this.getOwnerComponent().getModel();
-    const fn = oModel.bindContext("/UpdateTemplate(...)");
-
-    fn.setParameter("id", row.ID);
-    fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
-    fn.setParameter("status", "pending"); // 👈 IMPORTANT
-
-    await fn.execute();
-
-    this.byId("templateDashTable").getBinding("rows").refresh();
-
-    this._oEditExpiryDialog.close();
-  }
-}
-
-
-
-<IconTabBar id="editTabBar">
-
-<IconTabFilter text="Edit Expiry Date" key="expiry">
-
-<IconTabFilter text="Edit Template" key="template">
+  return "Template updated successfully";
+});
