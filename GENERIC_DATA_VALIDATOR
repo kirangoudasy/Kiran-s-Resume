@@ -1,62 +1,40 @@
-<Table items="{columnsModel>/columns}" class="sapUiSizeCompact">
+onEditExpirySave: async function () {
 
-    <columns>
-        <Column><Text text="Column Name"/></Column>
-        <Column><Text text="Data Type"/></Column>
-        <Column><Text text="Length / Precision"/></Column>
-        <Column><Text text="Scale"/></Column>
-        <Column><Text text="Constraints"/></Column>
-        <Column width="3rem"/>
-    </columns>
+  const oDialog = this._oEditExpiryDialog;
 
-    <items>
-        <ColumnListItem>
-            <cells>
+  // ✅ GET VALUE FROM MODEL (NOT BY ID)
+  const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
 
-                <!-- Column Name -->
-                <Input value="{columnsModel>COLUMN_NAME}"/>
+  if (!sNewDate) {
+    sap.m.MessageToast.show("Please select a date");
+    return;
+  }
 
-                <!-- Data Type -->
-                <Select selectedKey="{columnsModel>DATATYPE}" change=".onDataTypeChange">
-                    <items>
-                        <core:Item key="NVARCHAR" text="NVARCHAR"/>
-                        <core:Item key="TIMESTAMP" text="TIMESTAMP"/>
-                        <core:Item key="DECIMAL" text="DECIMAL"/>
-                        <core:Item key="DATE" text="DATE"/>
-                        <core:Item key="TIME" text="TIME"/>
-                    </items>
-                </Select>
+  const oTable = this.byId("templateDashTable");
+  const aIndices = oTable.getSelectedIndices();
 
-                <!-- Length -->
-                <StepInput 
-                    value="{columnsModel>LENGTH_PRECISION}" 
-                    min="1"
-                    max="1000"
-                    enabled="{= ${columnsModel>DATATYPE} === 'NVARCHAR' || ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
+  if (aIndices.length !== 1) {
+    sap.m.MessageToast.show("Please select exactly 1 row.");
+    return;
+  }
 
-                <!-- Scale -->
-                <StepInput 
-                    value="{columnsModel>SCALE}" 
-                    min="0"
-                    max="38"
-                    enabled="{= ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
+  const row = oTable.getContextByIndex(aIndices[0]).getObject();
 
-                <!-- Constraints -->
-                <Select selectedKey="{columnsModel>CONSTRAINTS}">
-                    <items>
-                        <core:Item key="NULL" text="NULL"/>
-                        <core:Item key="NOT NULL" text="NOT NULL"/>
-                    </items>
-                </Select>
+  const oModel = this.getOwnerComponent().getModel();
+  const fn = oModel.bindContext("/EditTemplateExpiry(...)");
 
-                <!-- Delete -->
-                <Button 
-                    icon="sap-icon://delete"
-                    type="Transparent"
-                    press=".onDeleteRow"/>
+  fn.setParameter("id", row.ID);
+  fn.setParameter("newExpiryDate", sNewDate);
 
-            </cells>
-        </ColumnListItem>
-    </items>
+  try {
+    await fn.execute();
 
-</Table>
+    this.byId("templateDashTable").getBinding("rows").refresh();
+
+    oDialog.close();
+
+  } catch (err) {
+    console.error(err);
+    sap.m.MessageToast.show("Error updating expiry");
+  }
+}
