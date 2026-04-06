@@ -1,21 +1,62 @@
-onDeleteRow: function (oEvent) {
+<Table items="{columnsModel>/columns}" class="sapUiSizeCompact">
 
-  const oItem = oEvent.getSource().getParent(); // ColumnListItem
-  const oContext = oItem.getBindingContext("columnsModel");
+    <columns>
+        <Column><Text text="Column Name"/></Column>
+        <Column><Text text="Data Type"/></Column>
+        <Column><Text text="Length / Precision"/></Column>
+        <Column><Text text="Scale"/></Column>
+        <Column><Text text="Constraints"/></Column>
+        <Column width="3rem"/>
+    </columns>
 
-  const oModel = this.getView().getModel("columnsModel");
-  const aData = oModel.getProperty("/columns");
+    <items>
+        <ColumnListItem>
+            <cells>
 
-  const iIndex = oContext.getPath().split("/")[2];
+                <!-- Column Name -->
+                <Input value="{columnsModel>COLUMN_NAME}"/>
 
-  // Optional confirmation (remove if you don’t want popup)
-  sap.m.MessageBox.confirm("Delete this column?", {
-    onClose: (action) => {
-      if (action === "OK") {
-        aData.splice(iIndex, 1);
-        oModel.setProperty("/columns", aData);
-      }
-    }
-  });
+                <!-- Data Type -->
+                <Select selectedKey="{columnsModel>DATATYPE}" change=".onDataTypeChange">
+                    <items>
+                        <core:Item key="NVARCHAR" text="NVARCHAR"/>
+                        <core:Item key="TIMESTAMP" text="TIMESTAMP"/>
+                        <core:Item key="DECIMAL" text="DECIMAL"/>
+                        <core:Item key="DATE" text="DATE"/>
+                        <core:Item key="TIME" text="TIME"/>
+                    </items>
+                </Select>
 
-}
+                <!-- Length -->
+                <StepInput 
+                    value="{columnsModel>LENGTH_PRECISION}" 
+                    min="1"
+                    max="1000"
+                    enabled="{= ${columnsModel>DATATYPE} === 'NVARCHAR' || ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
+
+                <!-- Scale -->
+                <StepInput 
+                    value="{columnsModel>SCALE}" 
+                    min="0"
+                    max="38"
+                    enabled="{= ${columnsModel>DATATYPE} === 'DECIMAL'}"/>
+
+                <!-- Constraints -->
+                <Select selectedKey="{columnsModel>CONSTRAINTS}">
+                    <items>
+                        <core:Item key="NULL" text="NULL"/>
+                        <core:Item key="NOT NULL" text="NOT NULL"/>
+                    </items>
+                </Select>
+
+                <!-- Delete -->
+                <Button 
+                    icon="sap-icon://delete"
+                    type="Transparent"
+                    press=".onDeleteRow"/>
+
+            </cells>
+        </ColumnListItem>
+    </items>
+
+</Table>
