@@ -1,10 +1,83 @@
 <core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
-    <Dialog id="editExpiryDialog" title="Edit Expiry Date" draggable="true" resizable="true">
-        <VBox id="vbox" class="sapUiSmallMargin">
-            <Label id="label" text="New Expiry Date"/>
-            <DatePicker id="editExpiryDatePicker" valueFormat="yyyy-MM-dd" displayFormat="long" required="true" />
-        </VBox>
-        <beginButton><Button id="btn1" text="save" press=".onEditExpirySave" /></beginButton>
-        <endButton><Button id="btn2" text="Cancel" press=".onEditExpiryCancel" /></endButton>
+
+    <Dialog id="editExpiryDialog" title="Edit Template" draggable="true" resizable="true" contentWidth="800px">
+
+        <content>
+
+            <IconTabBar>
+
+                <items>
+
+                    <!-- TAB 1 (EXISTING - NO CHANGE IN LOGIC) -->
+                    <IconTabFilter text="Edit Expiry Date">
+
+                        <VBox class="sapUiSmallMargin">
+
+                            <Label text="New Expiry Date"/>
+                            <DatePicker 
+                                id="editExpiryDatePicker" 
+                                valueFormat="yyyy-MM-dd" 
+                                displayFormat="long" 
+                                required="true"
+                                value="{editModel>/expiryDate}" />
+
+                        </VBox>
+
+                    </IconTabFilter>
+
+                    <!-- TAB 2 (NEW) -->
+                    <IconTabFilter text="Edit Template">
+
+                        <VBox class="sapUiSmallMargin">
+
+                            <Table items="{editModel>/columns}">
+
+                                <columns>
+                                    <Column><Text text="Column Name"/></Column>
+                                    <Column><Text text="Data Type"/></Column>
+                                    <Column><Text text="Constraints"/></Column>
+                                </columns>
+
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+
+                                            <Input value="{editModel>COLUMN_NAME}"/>
+
+                                            <Input value="{editModel>DATA_TYPE}"/>
+
+                                            <Input value="{editModel>CONSTRAINTS}"/>
+
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+
+                            </Table>
+
+                            <HBox class="sapUiSmallMarginTop">
+                                <Button text="Add Column" press=".onAddColumn"/>
+                                <Button text="Submit" type="Emphasized" press=".onSubmitEdit"/>
+                            </HBox>
+
+                        </VBox>
+
+                    </IconTabFilter>
+
+                </items>
+
+            </IconTabBar>
+
+        </content>
+
+        <!-- KEEP YOUR BUTTONS (NO CHANGE) -->
+        <beginButton>
+            <Button id="btn1" text="save" press=".onEditExpirySave" />
+        </beginButton>
+
+        <endButton>
+            <Button id="btn2" text="Cancel" press=".onEditExpiryCancel" />
+        </endButton>
+
     </Dialog>
+
 </core:FragmentDefinition>
