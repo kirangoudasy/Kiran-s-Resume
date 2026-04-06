@@ -77,20 +77,25 @@ onEditPress: async function () {
   }), "columnsModel");
 
   // =============================
-  // 🔹 LOAD DIALOG ONLY ONCE
+  // 🔥 FIX: DESTROY OLD FRAGMENT
   // =============================
-  if (!this._oEditExpiryDialog) {
-    this._oEditExpiryDialog = await sap.ui.core.Fragment.load({
-      id: this.getView().getId(), // VERY IMPORTANT
-      name: "fileuploader.view.fragment.EditExpiry",
-      controller: this
-    });
-    this.getView().addDependent(this._oEditExpiryDialog);
+  if (this._oEditExpiryDialog) {
+    this._oEditExpiryDialog.destroy();
+    this._oEditExpiryDialog = null;
   }
 
-  // ❌ REMOVE THIS (CAUSE OF BUG)
-  // this._oEditExpiryDialog.close();
+  // =============================
+  // 🔥 LOAD FRAGMENT (NO ID)
+  // =============================
+  this._oEditExpiryDialog = await sap.ui.core.Fragment.load({
+    name: "fileuploader.view.fragment.EditExpiry",
+    controller: this
+  });
 
-  // ✅ ONLY OPEN
+  this.getView().addDependent(this._oEditExpiryDialog);
+
+  // =============================
+  // ✅ OPEN DIALOG
+  // =============================
   this._oEditExpiryDialog.open();
 }
