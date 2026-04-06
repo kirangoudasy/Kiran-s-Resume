@@ -1,40 +1,97 @@
 onEditExpirySave: async function () {
 
-  const oDialog = this._oEditExpiryDialog;
+  const oTabBar = this.byId("editTabBar"); // give ID in fragment
+  const sSelectedKey = oTabBar.getSelectedKey();
 
-  // ✅ GET VALUE FROM MODEL (NOT BY ID)
-  const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
+  // =========================
+  // 👉 CASE 1: EXPIRY TAB
+  // =========================
+  if (sSelectedKey === "expiry") {
 
-  if (!sNewDate) {
-    sap.m.MessageToast.show("Please select a date");
-    return;
-  }
+    const sNewDate = this.getView().getModel("editModel").getProperty("/expiryDate");
 
-  const oTable = this.byId("templateDashTable");
-  const aIndices = oTable.getSelectedIndices();
+    if (!sNewDate) {
+      sap.m.MessageToast.show("Please select a date");
+      return;
+    }
 
-  if (aIndices.length !== 1) {
-    sap.m.MessageToast.show("Please select exactly 1 row.");
-    return;
-  }
+    const oTable = this.byId("templateDashTable");
+    const aIndices = oTable.getSelectedIndices();
 
-  const row = oTable.getContextByIndex(aIndices[0]).getObject();
+    if (aIndices.length !== 1) {
+      sap.m.MessageToast.show("Please select exactly 1 row.");
+      return;
+    }
 
-  const oModel = this.getOwnerComponent().getModel();
-  const fn = oModel.bindContext("/EditTemplateExpiry(...)");
+    const row = oTable.getContextByIndex(aIndices[0]).getObject();
 
-  fn.setParameter("id", row.ID);
-  fn.setParameter("newExpiryDate", sNewDate);
+    const oModel = this.getOwnerComponent().getModel();
+    const fn = oModel.bindContext("/EditTemplateExpiry(...)");
 
-  try {
+    fn.setParameter("id", row.ID);
+    fn.setParameter("newExpiryDate", sNewDate);
+
     await fn.execute();
 
     this.byId("templateDashTable").getBinding("rows").refresh();
 
-    oDialog.close();
+    this._oEditExpiryDialog.close();
+    return;
+  }
 
-  } catch (err) {
-    console.error(err);
-    sap.m.MessageToast.show("Error updating expiry");
+  // =========================
+  // 👉 CASE 2: TEMPLATE TAB
+  // =========================
+  if (sSelectedKey === "template") {
+
+    const aColumns = this.getView().getModel("columnsModel").getProperty("/columns");
+
+    if (!aColumns || aColumns.length === 0) {
+      sap.m.MessageToast.show("No template data found");
+      return;
+    }
+
+    const formatted = aColumns.map(col => {
+
+      let dataType = col.DATATYPE;
+
+      if (dataType === "NVARCHAR") {
+        dataType += `(${col.LENGTH_PRECISION || 1})`;
+      } 
+      else if (dataType === "DECIMAL") {
+        dataType += `(${col.LENGTH_PRECISION || 1},${col.SCALE || 0})`;
+      }
+
+      return {
+        COLUMN_NAME: col.COLUMN_NAME,
+        DATA_TYPE: dataType,
+        CONSTRAINTS: col.CONSTRAINTS
+      };
+    });
+
+    const oTable = this.byId("templateDashTable");
+    const aIndices = oTable.getSelectedIndices();
+    const row = oTable.getContextByIndex(aIndices[0]).getObject();
+
+    const oModel = this.getOwnerComponent().getModel();
+    const fn = oModel.bindContext("/UpdateTemplate(...)");
+
+    fn.setParameter("id", row.ID);
+    fn.setParameter("JSON_TEMPLATE", JSON.stringify(formatted));
+    fn.setParameter("status", "pending"); // 👈 IMPORTANT
+
+    await fn.execute();
+
+    this.byId("templateDashTable").getBinding("rows").refresh();
+
+    this._oEditExpiryDialog.close();
   }
 }
+
+
+
+<IconTabBar id="editTabBar">
+
+<IconTabFilter text="Edit Expiry Date" key="expiry">
+
+<IconTabFilter text="Edit Template" key="template">
