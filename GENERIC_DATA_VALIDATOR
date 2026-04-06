@@ -1,6 +1,6 @@
 <core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
 
-    <Dialog id="editExpiryDialog" title="Edit Template" draggable="true" resizable="true" contentWidth="800px">
+    <Dialog title="Edit Template" draggable="true" resizable="true" contentWidth="800px">
 
         <content>
 
@@ -8,7 +8,7 @@
 
                 <items>
 
-                    <!-- TAB 1: Edit Expiry Date (EXISTING) -->
+                    <!-- TAB 1: Edit Expiry Date -->
                     <IconTabFilter text="Edit Expiry Date">
 
                         <VBox class="sapUiSmallMargin">
@@ -22,32 +22,37 @@
 
                     </IconTabFilter>
 
-                    <!-- TAB 2: Edit Template (NEW) -->
+                    <!-- TAB 2: Edit Template -->
                     <IconTabFilter text="Edit Template">
 
                         <VBox class="sapUiSmallMargin">
 
-                            <Table items="{columnsModel>/columns}">
+                            <Table items="{columnsModel>/columns}" class="sapUiSizeCompact">
 
-                                <cells>
-                                    <Input value="{columnsModel>COLUMN_NAME}"/>
+                                <!-- ✅ COLUMNS -->
+                                <columns>
+                                    <Column><Text text="Column Name"/></Column>
+                                    <Column><Text text="Data Type"/></Column>
+                                    <Column><Text text="Constraints"/></Column>
+                                    <Column width="3rem"/>
+                                </columns>
 
-                                    <Input value="{columnsModel>DATATYPE}"/>
-
-                                    <Input value="{columnsModel>CONSTRAINTS}"/>
-
-                                    <Button 
-                                        icon="sap-icon://delete"
-                                        type="Transparent"
-                                        press=".onDeleteRow"/>
-                                </cells>
-
+                                <!-- ✅ ROW TEMPLATE -->
                                 <items>
                                     <ColumnListItem>
                                         <cells>
+
                                             <Input value="{columnsModel>COLUMN_NAME}"/>
-                                            <Input value="{columnsModel>DATA_TYPE}"/>
+
+                                            <Input value="{columnsModel>DATATYPE}"/>
+
                                             <Input value="{columnsModel>CONSTRAINTS}"/>
+
+                                            <Button 
+                                                icon="sap-icon://delete"
+                                                type="Transparent"
+                                                press=".onDeleteRow"/>
+
                                         </cells>
                                     </ColumnListItem>
                                 </items>
@@ -69,7 +74,7 @@
 
         </content>
 
-        <!-- EXISTING BUTTONS (UNCHANGED) -->
+        <!-- EXISTING BUTTONS -->
         <beginButton>
             <Button text="save" press=".onEditExpirySave" />
         </beginButton>
