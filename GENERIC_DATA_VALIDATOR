@@ -1,1 +1,10 @@
-[{"COLUMN_NAME":"FISCAL_PERIOD","DATA_TYPE":"NVARCHAR(100)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"PERIOD_TYPE","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_LEDGER","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_VIEW","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_FUNCTION","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_SEGMENT","DATA_TYPE":"NVARCHAR(100)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_BUSINESS_PRODUCT","DATA_TYPE":"NVARCHAR(100)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_BUSINESS_COST_CENTRE","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_GROUP_WITH_ENTITY","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_ENTITY","DATA_TYPE":"NVARCHAR(100)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_OPERATING_LOCATION","DATA_TYPE":"NVARCHAR(100)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_AUDIT","DATA_TYPE":"NVARCHAR(30)","CONSTRAINTS":"NULL"},{"COLUMN_NAME":"FK_GL_ACCOUNT","DATA_TYPE":"NVARCHAR(
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
+    <Dialog id="editExpiryDialog" title="Edit Expiry Date" draggable="true" resizable="true">
+        <VBox id="vbox" class="sapUiSmallMargin">
+            <Label id="label" text="New Expiry Date"/>
+            <DatePicker id="editExpiryDatePicker" valueFormat="yyyy-MM-dd" displayFormat="long" required="true" />
+        </VBox>
+        <beginButton><Button id="btn1" text="save" press=".onEditExpirySave" /></beginButton>
+        <endButton><Button id="btn2" text="Cancel" press=".onEditExpiryCancel" /></endButton>
+    </Dialog>
+</core:FragmentDefinition>
